@@ -6,6 +6,8 @@ by [Andrew Brampton](https://bramp.net) 2018
 
 ## Licence (Apache 2)
 
+This is not an official Google product.
+
 ```
 Copyright 2018 Google Inc. All Rights Reserved.
 
