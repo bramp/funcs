@@ -30,8 +30,16 @@ const instance = axios.create({
 
 const route = new Route('/:fund');
 
+/**
+ * Error for when there are illegal arguments passed to a function.
+ */
 class IllegalArgumentError extends Error {}
 
+/**
+ * Records this page view with Google Analytics.
+ *
+ * @param {Object}  req  Cloud Function request context.
+ */
 function googleAnalyticsTrack(req) {
     const visitor = ua('UA-136478-9', {https: true});
     visitor.pageview(req.url, function(err) {
@@ -49,8 +57,9 @@ function googleAnalyticsTrack(req) {
  *
  * @param {Object}  req  Cloud Function request context.
  * @param {Object}  res  Cloud Function response context.
+ * @return {Promise}    A promise.
  */
-const vanguard = (req, res) => {
+function vanguard(req, res) {
     const params = route.match(req.url);
     if (!params) {
         throw new IllegalArgumentError('Missing fund');
@@ -113,17 +122,27 @@ const vanguard = (req, res) => {
         ];
         res.status(200).header({
             'Content-Type': 'text/xml',
-            'Cache-Control': 'max-age=86400', // TODO(bramp) Set expire date instead for close of market.
+
+            // TODO(bramp) Set expire date instead for close of market.
+            'Cache-Control': 'max-age=86400',
         }).send(xml(funds, true));
     }))
     .catch((err) => {
         if (err.request) {
-            throw new Error('Failed to fetch "' + err.request.path + '": ' + err);
+            const url = err.request.path;
+            throw new Error('Failed to fetch "' + url + '": ' + err);
         }
         throw new Error('Failed to fetch data from Vanguard: ' + err);
     });
-}
+};
 
+
+/**
+ * Returns a promise which is rejected after the duration.
+ *
+ * @param   {int}     duration  The duration in milliseconds
+ * @return  {Promise}           A Promise.
+ */
 function timeout(duration) {
     return new Promise(function(_, reject) {
         setTimeout(() => {
@@ -132,6 +151,15 @@ function timeout(duration) {
     });
 }
 
+/**
+ * Wrapper around the actual function, to ensure it runs within a timeout, and
+ * if an error occurs an appropraite XML error page is returned.
+ *
+ * TODO Move this into some kind of middleware.
+ *
+ * @param {Object}  req  Cloud Function request context.
+ * @param {Object}  res  Cloud Function response context.
+ */
 exports.vanguard = (req, res) => {
     // TODO googleAnalyticsTrack is async, and may not finish before res.send
     // is called (which would mean it gets cancelled).

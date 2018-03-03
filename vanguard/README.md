@@ -3,7 +3,7 @@ by [Andrew Brampton](https://bramp.net) 2018
 
 Fetches fund information from Vanguard and it in XML format.
 
-Useful for importing information about Vanguard funds that do not have a ticker symbol, for example Collective Investment Trust funds, into Google Spreadsheets. For example:
+Useful for importing information about Vanguard funds that do not have a ticker symbol, for example [Collective Investment Trust](https://www.investopedia.com/terms/c/collective-investment-fund.asp) funds, into Google Spreadsheets. For example:
 
 ```
 =IMPORTXML("https://<path to cloud function>/vanguard/7555", "//fund/price") 
@@ -84,10 +84,12 @@ wget https://<path to cloud function>/vanguard/VIIIX
 
 ## TODO
 
-[ ] Fix the tests!
+ - [ ] Fix the tests!
 
 
 ## Licence (Apache 2)
+
+This is not an official Google product.
 
 ```
 Copyright 2018 Google Inc. All Rights Reserved.
