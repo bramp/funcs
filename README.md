@@ -1,8 +1,10 @@
 # Collection of Google Cloud Functions
 by [Andrew Brampton](https://bramp.net) 2018
 
+Collection of random [Google Cloud Functions](https://cloud.google.com/functions/) I've written for personal use.
+
 ## Functions (so far)
-* **Vanguard** - Fetches fund information from Vanguard and it in XML format.
+* **[vanguard](https://github.com/bramp/funcs/tree/master/vanguard)** - Fetches fund information from Vanguard and returns it in XML format.
 
 ## Licence (Apache 2)
 
