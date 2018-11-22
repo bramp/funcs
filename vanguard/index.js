@@ -64,7 +64,7 @@ function googleAnalyticsTrack(req) {
 function vanguard(req, res) {
     const params = route.match(req.url);
     if (!params) {
-        throw new IllegalArgumentError('Missing fund');
+        return Promise.reject(new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"'));
     }
 
     return axios.all([
@@ -148,7 +148,7 @@ function vanguard(req, res) {
 function timeout(duration) {
     return new Promise(function(_, reject) {
         setTimeout(() => {
-            reject(new Error('timeout after ' + duration + 'ms'));
+            reject(new Error('Timeout after ' + duration + 'ms'));
         }, duration);
     });
 }
