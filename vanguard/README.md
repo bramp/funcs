@@ -77,7 +77,7 @@ functions stop
 # Switch to the config for this project (if you don't have one `gcloud init`)
 gcloud config configurations activate funcs
 
-gcloud beta functions deploy vanguard --trigger-http
+gcloud functions deploy vanguard --runtime nodejs8 --trigger-http
 
 wget https://<path to cloud function>/vanguard/VIIIX
 ```
