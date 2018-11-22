@@ -1,7 +1,7 @@
 # Vanguard (Google Cloud Function)
 by [Andrew Brampton](https://bramp.net) 2018
 
-Fetches fund information from Vanguard and it in XML format.
+Fetches fund information from Vanguard and returns it in XML format.
 
 Useful for importing information about Vanguard funds that do not have a ticker symbol, for example [Collective Investment Trust](https://www.investopedia.com/terms/c/collective-investment-fund.asp) funds, into Google Spreadsheets. For example:
 
