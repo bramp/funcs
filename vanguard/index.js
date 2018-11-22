@@ -21,6 +21,8 @@ const Route = require('route-parser');
 const xml = require('xml');
 const ua = require('universal-analytics');
 
+const UA_ACCOUNT_ID = 'UA-136478-9';
+
 const instance = axios.create({
     baseURL: 'https://api.vanguard.com/',
     timeout: 20000,
@@ -41,7 +43,7 @@ class IllegalArgumentError extends Error {}
  * @param {Object}  req  Cloud Function request context.
  */
 function googleAnalyticsTrack(req) {
-    const visitor = ua('UA-136478-9', {https: true});
+    const visitor = ua(UA_ACCOUNT_ID, {https: true});
     visitor.pageview(req.url, function(err) {
         if (err) {
             console.log(err);
