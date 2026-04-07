@@ -3,10 +3,14 @@ name: Deploy
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+**'
 
 jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
   deploy-vanguard:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
@@ -15,18 +19,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 'Check secrets'
+        env:
+          WIF_PROVIDER_NAME: ${{ secrets.WIF_PROVIDER_NAME }}
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        run: |
+          if [ -z "$WIF_PROVIDER_NAME" ]; then echo "WIF_PROVIDER_NAME secret is not set"; exit 1; fi
+          if [ -z "$GCP_SERVICE_ACCOUNT" ]; then echo "GCP_SERVICE_ACCOUNT secret is not set"; exit 1; fi
+          if [ -z "$GCP_PROJECT_ID" ]; then echo "GCP_PROJECT_ID secret is not set"; exit 1; fi
+
       - id: 'auth'
-        uses: 'google-github-actions/auth@v2'
+        uses: 'google-github-actions/auth@v3'
         with:
-          # User needs to set up these secrets in GitHub
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: '${{ secrets.WIF_PROVIDER_NAME }}'
+          service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
 
       - id: 'deploy'
-        uses: 'google-github-actions/deploy-cloud-functions@v2'
+        uses: 'google-github-actions/deploy-cloud-functions@v3'
         with:
           name: 'vanguard'
           runtime: 'nodejs22'
           source_dir: 'vanguard'
           entry_point: 'vanguard'
           region: 'us-central1'
+          project_id: '${{ secrets.GCP_PROJECT_ID }}'
