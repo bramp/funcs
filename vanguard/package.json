@@ -1,25 +1,32 @@
 {
 	"name": "vanguard",
-	"version": "0.0.2",
+	"version": "0.1.0",
+	"type": "module",
 	"dependencies": {
-		"axios": "^0.17.1",
-		"npm": "^6.4.1",
-		"route-parser": "0.0.5",
-		"universal-analytics": "^0.4.20",
+		"axios": "^1.7.9",
+		"npm": "^11.1.0",
+		"route-parser": "^0.0.5",
+		"universal-analytics": "^0.5.3",
 		"xml": "^1.0.1"
 	},
 	"devDependencies": {
-		"ava": "^0.25.0",
-		"eslint": "^4.19.1",
-		"eslint-config-google": "^0.9.1",
-		"eslint-plugin-promise": "^3.8.0",
-		"rewire": "^3.0.2",
-		"sinon": "^4.5.0",
+		"@eslint/js": "^9.10.0",
+		"ava": "^6.2.0",
+		"eslint": "^9.10.0",
+		"eslint-plugin-promise": "^7.2.1",
+		"globals": "^15.9.0",
+		"prettier": "^3.5.2",
+		"rewire": "^7.0.0",
+		"sinon": "^19.0.2",
 		"sinon-express-mock": "^2.1.0",
-		"xml2js": "^0.4.19"
+		"xml2js": "^0.6.2"
+	},
+	"engines": {
+		"node": ">=20"
 	},
 	"scripts": {
-		"lint": "./node_modules/.bin/eslint --fix .",
+		"format": "prettier --write .",
+		"lint": "eslint --fix .",
 		"test": "ava"
 	}
 }

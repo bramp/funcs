@@ -13,55 +13,109 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-const test = require('ava');
-const sinon = require('sinon');
-const parseString = require('xml2js').parseString;
+
+import test from 'ava';
+import sinon from 'sinon';
+import { parseString } from 'xml2js';
 import { mockReq, mockRes } from 'sinon-express-mock';
+import { vanguard, instance, googleAnalyticsTrack } from './index.js';
 
-const rewire = require('rewire');
-const funcs = rewire('.');
-
-// Mock the axios instance.
-const instance = {
-  get: sinon.stub().resolves(null)// .returns(ret);
-}
-funcs.__set__('instance', instance);
-
-test('vanguard: should return a error when fund is missing', (t) => {
-  // Initialize mocks  
-  const req = mockReq({url: '/'})
-  const res = mockRes()
-
-  // Call tested function
-  funcs.vanguard(req, res);
-
-  // Verify behavior of tested function
-  t.true(res.send.calledOnce);
-  t.deepEqual(res.status.lastCall.args, [412]);
-  t.deepEqual(res.set.lastCall.args, ['Content-Type', 'text/xml']);
-
-  parseString(res.send.lastCall.args, function (err, result) {
-    t.deepEqual(result.error.message[0], 'Missing fund');
-  });
+test.beforeEach((t) => {
+  t.context.sandbox = sinon.createSandbox();
+  t.context.sandbox.stub({ googleAnalyticsTrack }, 'googleAnalyticsTrack');
 });
 
-test('vanguard: fetch fund', (t) => {
-  // Initialize mocks  
-  const req = mockReq({url: '/1234'})
-  const res = mockRes()
+test.afterEach((t) => {
+  t.context.sandbox.restore();
+});
 
-  //var mock = sinon.mock(myAPI);
-  //mock.expects("method").once().throws();
+test.serial(
+  'vanguard: should return a error when fund is missing',
+  async (t) => {
+    // Initialize mocks
+    const req = mockReq({ url: '' }); // Empty URL should fail match
+    const res = mockRes();
+
+    // Call tested function
+    await vanguard(req, res);
+
+    // Verify behavior of tested function
+    t.true(res.send.calledOnce);
+    t.is(res.status.lastCall.args[0], 412);
+    t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
+
+    await new Promise((resolve, reject) => {
+      parseString(res.send.lastCall.args[0], function (err, result) {
+        if (err) return reject(err);
+        t.is(
+          result.error.message[0],
+          'Fund missing from url, e.g. "https://example.com/vanguard/fundId"',
+        );
+        resolve();
+      });
+    });
+  },
+);
+
+test.serial('vanguard: fetch fund', async (t) => {
+  // Initialize mocks
+  const req = mockReq({ url: '/1234' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  instanceGet.resolves({
+    data: {
+      fundProfile: {
+        fundId: '1234',
+        ticker: 'TICK',
+        longName: 'Long Name',
+        shortName: 'Short Name',
+        category: 'Category',
+        expenseRatio: '0.1',
+        cusip: 'CUSIP',
+      },
+      currentPrice: {
+        dailyPrice: {
+          regular: {
+            price: '100.00',
+            asOfDate: '2024-01-01',
+          },
+        },
+      },
+      monthEndAvgAnnualRtn: {
+        fundReturn: {
+          tenYrPct: '10',
+          fiveYrPct: '5',
+          threeYrPct: '3',
+          oneYrPct: '1',
+          threeMonthPct: '0.5',
+        },
+        benchmarkReturn: {
+          name: 'Benchmark',
+          tenYrPct: '9',
+          fiveYrPct: '4',
+          threeYrPct: '2',
+          oneYrPct: '0.5',
+          threeMonthPct: '0.2',
+        },
+      },
+    },
+  });
 
   // Call tested function
-  funcs.vanguard(req, res);
+  await vanguard(req, res);
 
   // Verify behavior of tested function
   t.true(res.send.calledOnce);
-  t.deepEqual(res.status.lastCall.args, [200]);
-  t.deepEqual(res.set.lastCall.args, ['Content-Type', 'text/xml']);
+  t.is(res.status.lastCall.args[0], 200);
+  t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
 
-  parseString(res.send.lastCall.args, function (err, result) {
-    t.deepEqual(result.error.message[0], 'Missing fund');
+  await new Promise((resolve, reject) => {
+    parseString(res.send.lastCall.args[0], function (err, result) {
+      if (err) return reject(err);
+      t.is(result.fund.id[0], '1234');
+      t.is(result.fund.ticker[0], 'TICK');
+      resolve();
+    });
   });
 });

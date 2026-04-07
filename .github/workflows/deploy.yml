@@ -1,0 +1,32 @@
+name: Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  deploy-vanguard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: 'auth'
+        uses: 'google-github-actions/auth@v2'
+        with:
+          # User needs to set up these secrets in GitHub
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - id: 'deploy'
+        uses: 'google-github-actions/deploy-cloud-functions@v2'
+        with:
+          name: 'vanguard'
+          runtime: 'nodejs22'
+          source_dir: 'vanguard'
+          entry_point: 'vanguard'
+          region: 'us-central1'

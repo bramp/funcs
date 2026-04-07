@@ -1,4 +1,5 @@
 # Vanguard (Google Cloud Function)
+
 by [Andrew Brampton](https://bramp.net) 2018
 
 Fetches fund information from Vanguard and returns it in XML format.
@@ -6,7 +7,7 @@ Fetches fund information from Vanguard and returns it in XML format.
 Useful for importing information about Vanguard funds that do not have a ticker symbol, for example [Collective Investment Trust](https://www.investopedia.com/terms/c/collective-investment-fund.asp) funds, into Google Spreadsheets. For example:
 
 ```
-=IMPORTXML("https://<path to cloud function>/vanguard/7555", "//fund/price") 
+=IMPORTXML("https://<path to cloud function>/vanguard/7555", "//fund/price")
 ```
 
 ```xml
@@ -84,8 +85,7 @@ wget https://<path to cloud function>/vanguard/VIIIX
 
 ## TODO
 
- - [ ] Fix the tests!
-
+- [ ] Fix the tests!
 
 ## Licence (Apache 2)
 
