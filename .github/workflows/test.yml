@@ -2,9 +2,9 @@ name: Test
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_call:
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [ 20, 22, 23 ]
+        node-version: [ 24 ]
 
     steps:
       - uses: actions/checkout@v6

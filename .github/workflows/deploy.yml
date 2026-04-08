@@ -45,7 +45,7 @@ jobs:
         timeout-minutes: 10
         with:
           name: 'vanguard'
-          runtime: 'nodejs22'
+          runtime: 'nodejs24'
           source_dir: 'vanguard'
           entry_point: 'vanguard'
           region: 'us-central1'
