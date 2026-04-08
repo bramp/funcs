@@ -3,10 +3,9 @@
 	"version": "1.0.0",
 	"type": "module",
 	"dependencies": {
+		"@google-cloud/functions-framework": "^3.4.0",
 		"axios": "^1.7.9",
-		"npm": "^11.1.0",
 		"route-parser": "^0.0.5",
-		"universal-analytics": "^0.5.3",
 		"xml": "^1.0.1"
 	},
 	"devDependencies": {
@@ -16,7 +15,6 @@
 		"eslint-plugin-promise": "^7.2.1",
 		"globals": "^15.9.0",
 		"prettier": "^3.5.2",
-		"rewire": "^7.0.0",
 		"sinon": "^19.0.2",
 		"sinon-express-mock": "^2.1.0",
 		"xml2js": "^0.6.2"

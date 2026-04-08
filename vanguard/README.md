@@ -1,6 +1,6 @@
 # Vanguard (Google Cloud Function)
 
-by [Andrew Brampton](https://bramp.net) 2018
+by [Andrew Brampton](https://bramp.net) 2018-2026
 
 Fetches fund information from Vanguard and returns it in XML format.
 

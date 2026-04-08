@@ -25,10 +25,14 @@ jobs:
           WIF_PROVIDER_NAME: ${{ secrets.WIF_PROVIDER_NAME }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
           GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
         run: |
           if [ -z "$WIF_PROVIDER_NAME" ]; then echo "WIF_PROVIDER_NAME secret is not set"; exit 1; fi
           if [ -z "$GCP_SERVICE_ACCOUNT" ]; then echo "GCP_SERVICE_ACCOUNT secret is not set"; exit 1; fi
           if [ -z "$GCP_PROJECT_ID" ]; then echo "GCP_PROJECT_ID secret is not set"; exit 1; fi
+          if [ -z "$GA_MEASUREMENT_ID" ]; then echo "GA_MEASUREMENT_ID secret is not set"; exit 1; fi
+          if [ -z "$GA_API_SECRET" ]; then echo "GA_API_SECRET secret is not set"; exit 1; fi
 
       - id: 'auth'
         uses: 'google-github-actions/auth@v3'
@@ -47,3 +51,4 @@ jobs:
           region: 'us-central1'
           memory: '128M'
           project_id: '${{ secrets.GCP_PROJECT_ID }}'
+          environment_variables: 'GA_MEASUREMENT_ID=${{ secrets.GA_MEASUREMENT_ID }},GA_API_SECRET=${{ secrets.GA_API_SECRET }}'

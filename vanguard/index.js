@@ -15,12 +15,13 @@
  */
 
 import axios from 'axios';
+import crypto from 'crypto';
 import https from 'https';
 import Route from 'route-parser';
 import xml from 'xml';
-import ua from 'universal-analytics';
 
-const UA_ACCOUNT_ID = 'UA-136478-9';
+const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID;
+const GA_API_SECRET = process.env.GA_API_SECRET;
 
 export const instance = axios.create({
     baseURL: 'https://api.vanguard.com/',
@@ -37,20 +38,28 @@ const route = new Route('/:fund');
 class IllegalArgumentError extends Error { }
 
 /**
- * Records this page view with Google Analytics.
+ * Records this page view with Google Analytics 4 Measurement Protocol.
+ * Fire-and-forget: errors are logged but do not affect the response.
  *
  * @param {Object}  req  Cloud Function request context.
  */
 export function googleAnalyticsTrack(req) {
-    if (process.env.NODE_ENV === 'test' || !req.url) {
+    if (!GA_MEASUREMENT_ID || !GA_API_SECRET || !req.url) {
         return;
     }
-    const visitor = ua(UA_ACCOUNT_ID, { https: true });
-    visitor.pageview(req.url, function (err) {
-        if (err) {
-            console.log(err);
-        }
-    }).send();
+
+    const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`;
+    axios.post(url, {
+        client_id: crypto.randomUUID(),
+        events: [{
+            name: 'page_view',
+            params: {
+                page_location: req.url,
+            },
+        }],
+    }).catch((err) => {
+        console.log('GA4 tracking error:', err.message);
+    });
 }
 
 /**
@@ -63,131 +72,108 @@ export function googleAnalyticsTrack(req) {
  * @param {Object}  res  Cloud Function response context.
  * @return {Promise}    A promise.
  */
-function vanguardFetch(req, res) {
+async function vanguardFetch(req, res) {
     const params = route.match(req.url);
     if (!params) {
-        return Promise.reject(new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"'));
+        throw new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"');
     }
 
-    return axios.all([
+    const [profileRes, priceRes, performanceRes] = await Promise.all([
         instance.get(`/rs/ire/01/pe/fund/${params.fund}/profile/.json`),
         instance.get(`/rs/ire/01/pe/fund/${params.fund}/price/.json`),
         instance.get(`/rs/ire/01/pe/fund/${params.fund}/performance/.json`),
-    ])
-        .then(axios.spread((profileRes, priceRes, performanceRes) => {
-            const profile = profileRes.data.fundProfile || {};
-            const price = priceRes.data.currentPrice.dailyPrice.regular || {};
-            const performance = performanceRes.data.monthEndAvgAnnualRtn || {};
+    ]);
 
-            const fundIds = profile.associatedFundIds || {};
+    const profile = profileRes.data.fundProfile || {};
+    const price = priceRes.data.currentPrice.dailyPrice.regular || {};
+    const performance = performanceRes.data.monthEndAvgAnnualRtn || {};
 
-            const fundReturn = performance.fundReturn || {};
-            const benchmarkReturn = performance.benchmarkReturn || {};
+    const fundIds = profile.associatedFundIds || {};
 
-            const funds = [
+    const fundReturn = performance.fundReturn || {};
+    const benchmarkReturn = performance.benchmarkReturn || {};
+
+    const funds = [
+        {
+            fund: [
+                { id: profile.fundId },
+                { ticker: profile.ticker },
+                { name: profile.longName.trim() },
+                { shortName: profile.shortName.trim() },
+                { category: profile.category.trim() },
+
+                // Price
+                { price: price.price },
+                { priceAsOfDate: price.asOfDate },
+                { expenseRatio: profile.expenseRatio },
+
+                // Average annual returns—updated monthly
                 {
-                    fund: [
-                        { id: profile.fundId },
-                        { ticker: profile.ticker },
-                        { name: profile.longName.trim() },
-                        { shortName: profile.shortName.trim() },
-                        { category: profile.category.trim() },
-
-                        // Price
-                        { price: price.price },
-                        { priceAsOfDate: price.asOfDate },
-                        { expenseRatio: profile.expenseRatio },
-
-                        // Average annual returns—updated monthly
-                        {
-                            fundReturn: [
-                                { tenYrPct: fundReturn.tenYrPct },
-                                { fiveYrPct: fundReturn.fiveYrPct },
-                                { threeYrPct: fundReturn.threeYrPct },
-                                { oneYrPct: fundReturn.oneYrPct },
-                                { threeMonthPct: fundReturn.threeMonthPct },
-                            ]
-                        },
-                        {
-                            benchmarkReturn: [
-                                { name: benchmarkReturn.name.trim() },
-                                { tenYrPct: benchmarkReturn.tenYrPct },
-                                { fiveYrPct: benchmarkReturn.fiveYrPct },
-                                { threeYrPct: benchmarkReturn.threeYrPct },
-                                { oneYrPct: benchmarkReturn.oneYrPct },
-                                { threeMonthPct: benchmarkReturn.threeMonthPct },
-                            ]
-                        },
-
-                        // Fund IDs
-                        { cusip: profile.cusip },
-                        { citFundId: profile.citFundId }, // Collective Investment Trust
-                        { admiralFundId: fundIds.admiralFundId },
-                        { etfFundId: fundIds.etfFundId },
-                        { investorFundId: fundIds.investorFundId },
-                        { institutionalFundId: fundIds.institutionalFundId },
-                        { institutionalPlusFundId: fundIds.institutionalPlusFundId },
+                    fundReturn: [
+                        { tenYrPct: fundReturn.tenYrPct },
+                        { fiveYrPct: fundReturn.fiveYrPct },
+                        { threeYrPct: fundReturn.threeYrPct },
+                        { oneYrPct: fundReturn.oneYrPct },
+                        { threeMonthPct: fundReturn.threeMonthPct },
                     ]
                 },
-            ];
-            res.status(200).set({
-                'Content-Type': 'text/xml',
+                {
+                    benchmarkReturn: [
+                        { name: benchmarkReturn.name.trim() },
+                        { tenYrPct: benchmarkReturn.tenYrPct },
+                        { fiveYrPct: benchmarkReturn.fiveYrPct },
+                        { threeYrPct: benchmarkReturn.threeYrPct },
+                        { oneYrPct: benchmarkReturn.oneYrPct },
+                        { threeMonthPct: benchmarkReturn.threeMonthPct },
+                    ]
+                },
 
-                // TODO(bramp) Set expire date instead for close of market.
-                'Cache-Control': 'max-age=86400',
-            }).send(xml(funds, true));
-        }))
-        .catch((err) => {
-            if (err.request) {
-                const url = err.request.path;
-                throw new Error('Failed to fetch "' + url + '": ' + err);
-            }
-            throw new Error('Failed to fetch data from Vanguard: ' + err);
-        });
+                // Fund IDs
+                { cusip: profile.cusip },
+                { citFundId: profile.citFundId }, // Collective Investment Trust
+                { admiralFundId: fundIds.admiralFundId },
+                { etfFundId: fundIds.etfFundId },
+                { investorFundId: fundIds.investorFundId },
+                { institutionalFundId: fundIds.institutionalFundId },
+                { institutionalPlusFundId: fundIds.institutionalPlusFundId },
+            ]
+        },
+    ];
+
+    res.status(200).set({
+        'Content-Type': 'text/xml',
+
+        // TODO(bramp) Set expire date instead for close of market.
+        'Cache-Control': 'max-age=86400',
+    }).send(xml(funds, true));
 };
 
 /**
- * Wrapper around the actual function, to ensure it runs within a timeout, and
- * if an error occurs an appropraite XML error page is returned.
- *
- * TODO Move this into some kind of middleware.
+ * Wrapper around the actual function to ensure errors return
+ * an appropriate XML error page.
  *
  * @param {Object}  req  Cloud Function request context.
  * @param {Object}  res  Cloud Function response context.
  */
-export const vanguard = (req, res) => {
-    // TODO googleAnalyticsTrack is async, and may not finish before res.send
-    // is called (which would mean it gets cancelled).
+export const vanguard = async (req, res) => {
     googleAnalyticsTrack(req);
 
-    let timeoutId;
-    const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-            reject(new Error('Timeout after 30000ms'));
-        }, 30000);
-    });
+    try {
+        await vanguardFetch(req, res);
+    } catch (err) {
+        console.log(err);
 
-    return Promise.race([
-        timeoutPromise,
-        vanguardFetch(req, res),
-    ])
-        .finally(() => {
-            clearTimeout(timeoutId);
-        })
-        .catch((err) => {
-            console.log(err);
+        const status = (err instanceof IllegalArgumentError) ? 412 : 500;
+        const error = [
+            {
+                error: [
+                    { message: err.message },
+                ]
+            },
+        ];
 
-            const status = (err instanceof IllegalArgumentError) ? 412 : 500;
-            const error = [
-                {
-                    error: [
-                        { message: err.message },
-                    ]
-                },
-            ];
-
-            res.status(status).set({
-                'Content-Type': 'text/xml',
-            }).send(xml(error, true));
-        });
+        res.status(status).set({
+            'Content-Type': 'text/xml',
+        }).send(xml(error, true));
+    }
 };
