@@ -45,4 +45,5 @@ jobs:
           source_dir: 'vanguard'
           entry_point: 'vanguard'
           region: 'us-central1'
+          memory: '128M'
           project_id: '${{ secrets.GCP_PROJECT_ID }}'
