@@ -78,15 +78,18 @@ async function vanguardFetch(req, res) {
         throw new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"');
     }
 
-    const [profileRes, priceRes, performanceRes] = await Promise.all([
+    const [profileRes, priceRes, performanceRes, expenseRes] = await Promise.all([
         instance.get(`/rs/ire/01/pe/fund/${params.fund}/profile/.json`),
         instance.get(`/rs/ire/01/pe/fund/${params.fund}/price/.json`),
         instance.get(`/rs/ire/01/pe/fund/${params.fund}/performance/.json`),
+        instance.get(`/rs/ire/01/pe/fund/${params.fund}/expense/.json`),
     ]);
+
 
     const profile = profileRes.data.fundProfile || {};
     const price = priceRes.data.currentPrice.dailyPrice.regular || {};
     const performance = performanceRes.data.monthEndAvgAnnualRtn || {};
+    const expense = expenseRes.data || {};
 
     const fundIds = profile.associatedFundIds || {};
 
@@ -105,7 +108,7 @@ async function vanguardFetch(req, res) {
                 // Price
                 { price: price.price },
                 { priceAsOfDate: price.asOfDate },
-                { expenseRatio: profile.expenseRatio },
+                { expenseRatio: expense.expenseRatio || profile.expenseRatio },
 
                 // Average annual returns—updated monthly
                 {

@@ -63,7 +63,7 @@ test.serial('vanguard: fetch fund', async (t) => {
   const res = mockRes();
 
   const instanceGet = t.context.sandbox.stub(instance, 'get');
-  instanceGet.resolves({
+  instanceGet.withArgs(sinon.match(/profile/)).resolves({
     data: {
       fundProfile: {
         fundId: '1234',
@@ -74,6 +74,10 @@ test.serial('vanguard: fetch fund', async (t) => {
         expenseRatio: '0.1',
         cusip: 'CUSIP',
       },
+    },
+  });
+  instanceGet.withArgs(sinon.match(/price/)).resolves({
+    data: {
       currentPrice: {
         dailyPrice: {
           regular: {
@@ -82,6 +86,10 @@ test.serial('vanguard: fetch fund', async (t) => {
           },
         },
       },
+    },
+  });
+  instanceGet.withArgs(sinon.match(/performance/)).resolves({
+    data: {
       monthEndAvgAnnualRtn: {
         fundReturn: {
           tenYrPct: '10',
@@ -99,6 +107,12 @@ test.serial('vanguard: fetch fund', async (t) => {
           threeMonthPct: '0.2',
         },
       },
+    },
+  });
+  instanceGet.withArgs(sinon.match(/expense/)).resolves({
+    data: {
+      expenseRatio: '0.0150',
+      expenseRatioAsOfDate: '2025-12-31T00:00:00-05:00',
     },
   });
 
