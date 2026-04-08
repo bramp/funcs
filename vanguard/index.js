@@ -30,7 +30,10 @@ export const instance = axios.create({
     httpsAgent: new https.Agent({ keepAlive: true }),
 });
 
-const route = new Route('/:fund');
+const routes = [
+    new Route('/vanguard/:fund'),  // cloudfunctions.net path (includes function name)
+    new Route('/:fund'),            // run.app path (no function name prefix)
+];
 
 /**
  * Error for when there are illegal arguments passed to a function.
@@ -73,7 +76,11 @@ export function googleAnalyticsTrack(req) {
  * @return {Promise}    A promise.
  */
 async function vanguardFetch(req, res) {
-    const params = route.match(req.url);
+    let params;
+    for (const route of routes) {
+        params = route.match(req.url);
+        if (params) break;
+    }
     if (!params) {
         throw new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"');
     }
