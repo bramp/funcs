@@ -49,6 +49,6 @@ jobs:
           source_dir: 'vanguard'
           entry_point: 'vanguard'
           region: 'us-central1'
-          memory: '128M'
+          memory: '128Mi'
           project_id: '${{ secrets.GCP_PROJECT_ID }}'
           environment_variables: 'GA_MEASUREMENT_ID=${{ secrets.GA_MEASUREMENT_ID }},GA_API_SECRET=${{ secrets.GA_API_SECRET }}'
