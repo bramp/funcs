@@ -41,7 +41,7 @@ jobs:
         with:
           name: 'vanguard'
           runtime: 'nodejs22'
-          gen: 1
+          environment: 'GEN_1'
           source_dir: 'vanguard'
           entry_point: 'vanguard'
           region: 'us-central1'
