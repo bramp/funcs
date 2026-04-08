@@ -5,4 +5,21 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-json
       - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: make-lint
+        name: make lint
+        entry: make lint
+        language: system
+        files: \.(js|json|md)$
+        pass_filenames: false
+
+      - id: make-test
+        name: make test
+        entry: make test
+        language: system
+        files: \.(js|json|md)$
+        pass_filenames: false
