@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'vanguard/**'
+      - '!vanguard/test.js'
+      - '!vanguard/README.md'
+      - '!vanguard/Makefile'
 
 jobs:
   test:
