@@ -15,7 +15,7 @@
 		"eslint-plugin-promise": "^7.2.1",
 		"globals": "^15.9.0",
 		"prettier": "^3.8.2",
-		"sinon": "^21.0.3",
+		"sinon": "^21.1.2",
 		"sinon-express-mock": "^2.1.0",
 		"xml2js": "^0.6.2"
 	},
