@@ -13,7 +13,7 @@
 		"ava": "^7.0.0",
 		"eslint": "^9.10.0",
 		"eslint-plugin-promise": "^7.2.1",
-		"globals": "^15.9.0",
+		"globals": "^17.5.0",
 		"prettier": "^3.8.3",
 		"sinon": "^21.1.2",
 		"sinon-express-mock": "^2.1.0",
