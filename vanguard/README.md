@@ -57,34 +57,32 @@ npm test
 
 Use the benchmark to measure memory and throughput before/after code changes.
 
-It runs the function in-process, sends requests across 10 rotating fund IDs (by default), and routes all upstream API calls to a local mock server (no real Vanguard traffic).
+It runs the function in-process with `tinybench`, sends requests across rotating fund IDs, and routes all upstream API calls to a local mock server (no real Vanguard traffic).
 
 ```shell
 npm run bench:memory
 ```
 
-The benchmark prints JSON with:
+The command prints clear tables for:
 
-- `memory.baseline`: process memory before warmup
-- `memory.postWarmup`: memory after warmup requests
-- `memory.postRun`: memory after the benchmark run
-- `memory.deltasMiB`: net growth from baseline (RSS + heap)
-- `run.peakRssMiB`: peak RSS observed during execution
-- `run.durationMs`: total run time for the measured phase
-- `mock.requestCount`: number of mock upstream requests handled
+- throughput and latency (`tinybench` stats)
+- memory snapshots (`baseline`, `postWarmup`, `postRun`, and deltas)
+- total mock request count
 
 You can tune benchmark behavior with environment variables:
 
 ```shell
-BENCH_ITERATIONS=5000 \
+BENCH_TIME_MS=5000 \
+BENCH_WARMUP_TIME_MS=1000 \
 BENCH_CONCURRENCY=50 \
-BENCH_WARMUP=200 \
+BENCH_MOCK_DELAY_MS=5 \
 BENCH_FUNDS=1234,1235,1236,1237,1238,1239,1240,1241,1242,1243 \
 npm run bench:memory
 ```
 
 Notes:
 
+- For branch comparison, run `npm run bench:memory` on each branch with the same env vars and compare the tables.
 - `BENCH_FUNDS` controls cache diversity. More unique IDs means less cache reuse.
 - The function supports `VANGUARD_BASE_URL` for overriding upstream base URL (used by the benchmark to point at localhost mock server).
 - Benchmark files are excluded from deploy uploads via `.gcloudignore`.

@@ -118,7 +118,7 @@ async function vanguardFetch(req, res) {
                 { priceAsOfDate: price.asOfDate },
                 { expenseRatio: expense.expenseRatio || profile.expenseRatio },
 
-                // Average annual returns—updated monthly
+                // Average annual returns-updated monthly
                 {
                     fundReturn: [
                         { tenYrPct: fundReturn.tenYrPct },

@@ -62,7 +62,7 @@ function buildStubData(fundId) {
 }
 
 export function createMockServer(http, options = {}) {
-  const delayMs = Number(options.delayMs || 0);
+  const delayMs = Number(options.delayMs ?? 1000);
   let requestCount = 0;
 
   const server = http.createServer(async (req, res) => {

@@ -1,15 +1,14 @@
-import { performance } from 'perf_hooks';
+import { Bench } from 'tinybench';
 import { createMockServer } from './bench/createMockServer.js';
 
-const ITERATIONS = Number(process.env.BENCH_ITERATIONS || '1000');
+const TIME_MS = Number(process.env.BENCH_TIME_MS || '3000');
+const WARMUP_TIME_MS = Number(process.env.BENCH_WARMUP_TIME_MS || '1000');
 const CONCURRENCY = Number(process.env.BENCH_CONCURRENCY || '20');
-const WARMUP = Number(process.env.BENCH_WARMUP || '100');
 const MOCK_DELAY_MS = Number(process.env.BENCH_MOCK_DELAY_MS || '0');
 const FUNDS = (process.env.BENCH_FUNDS || '1234,1235,1236,1237,1238,1239,1240,1241,1242,1243')
   .split(',')
   .map((fund) => fund.trim())
   .filter(Boolean);
-const COLD_REQUESTS = Number(process.env.BENCH_COLD_REQUESTS || String(FUNDS.length));
 
 function toMiB(bytes) {
   return Number((bytes / (1024 * 1024)).toFixed(2));
@@ -32,7 +31,7 @@ function forceGc() {
   }
 }
 
-function makeReq(url = '/1234') {
+function makeReq(url) {
   return { url };
 }
 
@@ -56,93 +55,8 @@ function makeRes() {
   };
 }
 
-async function runBatch(vanguard, totalRequests, concurrency) {
-  const start = performance.now();
-  let completed = 0;
-  let peakRss = process.memoryUsage().rss;
-  const seenFunds = new Set();
-  const coldLatency = {
-    count: 0,
-    totalMs: 0,
-    minMs: Number.POSITIVE_INFINITY,
-    maxMs: 0,
-  };
-  const warmLatency = {
-    count: 0,
-    totalMs: 0,
-    minMs: Number.POSITIVE_INFINITY,
-    maxMs: 0,
-  };
-
-  const worker = async () => {
-    while (completed < totalRequests) {
-      const index = completed;
-      completed += 1;
-
-      const fund = FUNDS[index % FUNDS.length];
-      const isCold = !seenFunds.has(fund) && coldLatency.count < COLD_REQUESTS;
-      if (isCold) {
-        seenFunds.add(fund);
-      }
-
-      const req = makeReq(`/vanguard/${fund}`);
-      const res = makeRes();
-
-      const reqStart = performance.now();
-      await vanguard(req, res);
-      const latencyMs = Number((performance.now() - reqStart).toFixed(2));
-
-      if (isCold) {
-        coldLatency.count += 1;
-        coldLatency.totalMs += latencyMs;
-        coldLatency.minMs = Math.min(coldLatency.minMs, latencyMs);
-        coldLatency.maxMs = Math.max(coldLatency.maxMs, latencyMs);
-      } else {
-        warmLatency.count += 1;
-        warmLatency.totalMs += latencyMs;
-        warmLatency.minMs = Math.min(warmLatency.minMs, latencyMs);
-        warmLatency.maxMs = Math.max(warmLatency.maxMs, latencyMs);
-      }
-
-      const rss = process.memoryUsage().rss;
-      if (rss > peakRss) {
-        peakRss = rss;
-      }
-    }
-  };
-
-  await Promise.all(Array.from({ length: concurrency }, worker));
-
-  return {
-    durationMs: Number((performance.now() - start).toFixed(2)),
-    peakRssMiB: toMiB(peakRss),
-    latency: {
-      coldRequests: {
-        count: coldLatency.count,
-        avgMs: coldLatency.count > 0
-          ? Number((coldLatency.totalMs / coldLatency.count).toFixed(2))
-          : 0,
-        minMs: coldLatency.count > 0
-          ? Number(coldLatency.minMs.toFixed(2))
-          : 0,
-        maxMs: coldLatency.count > 0
-          ? Number(coldLatency.maxMs.toFixed(2))
-          : 0,
-      },
-      warmRequests: {
-        count: warmLatency.count,
-        avgMs: warmLatency.count > 0
-          ? Number((warmLatency.totalMs / warmLatency.count).toFixed(2))
-          : 0,
-        minMs: warmLatency.count > 0
-          ? Number(warmLatency.minMs.toFixed(2))
-          : 0,
-        maxMs: warmLatency.count > 0
-          ? Number(warmLatency.maxMs.toFixed(2))
-          : 0,
-      },
-    },
-  };
+function printTable(rows) {
+  console.table(rows);
 }
 
 async function main() {
@@ -163,47 +77,101 @@ async function main() {
 
     // Import after env configuration so axios picks up VANGUARD_BASE_URL.
     const { vanguard } = await import(`./index.js?bench=${Date.now()}`);
+    let requestCounter = 0;
+
+    const bench = new Bench({
+      time: TIME_MS,
+      warmupTime: WARMUP_TIME_MS,
+      iterations: 1,
+      warmupIterations: 1,
+    });
+
+    bench.add('vanguard-batch', async () => {
+      const startIndex = requestCounter;
+      requestCounter += CONCURRENCY;
+
+      const tasks = Array.from({ length: CONCURRENCY }, (_, i) => {
+        const fund = FUNDS[(startIndex + i) % FUNDS.length];
+        return vanguard(makeReq(`/vanguard/${fund}`), makeRes());
+      });
+
+      await Promise.all(tasks);
+    });
 
     forceGc();
     const baseline = memorySnapshot();
 
-    await runBatch(vanguard, WARMUP, CONCURRENCY);
+    await bench.warmup();
     forceGc();
     const postWarmup = memorySnapshot();
 
-    const run = await runBatch(vanguard, ITERATIONS, CONCURRENCY);
+    await bench.run();
+    const task = bench.tasks[0];
+    const result = task.result;
+
     forceGc();
     const postRun = memorySnapshot();
 
-    const report = {
-      config: {
-        node: process.version,
-        iterations: ITERATIONS,
-        concurrency: CONCURRENCY,
-        warmup: WARMUP,
-        mockDelayMs: MOCK_DELAY_MS,
-        funds: FUNDS,
-        coldRequests: COLD_REQUESTS,
-        urlPattern: '/vanguard/:fund',
-        mockBaseUrl,
-        vanguardBaseUrl: process.env.VANGUARD_BASE_URL,
-      },
-      memory: {
-        baseline,
-        postWarmup,
-        postRun,
-        deltasMiB: {
-          rss: Number((postRun.rssMiB - baseline.rssMiB).toFixed(2)),
-          heapUsed: Number((postRun.heapUsedMiB - baseline.heapUsedMiB).toFixed(2)),
-        },
-      },
-      run,
-      mock: {
-        requestCount: getRequestCount(),
-      },
-    };
+    const throughputReqPerSec = Number(((result.hz || 0) * CONCURRENCY).toFixed(2));
+    const deltaRss = Number((postRun.rssMiB - baseline.rssMiB).toFixed(2));
+    const deltaHeap = Number((postRun.heapUsedMiB - baseline.heapUsedMiB).toFixed(2));
 
-    console.log(JSON.stringify(report, null, 2));
+    console.log('Benchmark config');
+    printTable([
+      { key: 'node', value: process.version },
+      { key: 'benchTimeMs', value: TIME_MS },
+      { key: 'warmupTimeMs', value: WARMUP_TIME_MS },
+      { key: 'concurrency', value: CONCURRENCY },
+      { key: 'fundCount', value: FUNDS.length },
+      { key: 'mockDelayMs', value: MOCK_DELAY_MS },
+      { key: 'mockBaseUrl', value: mockBaseUrl },
+    ]);
+
+    console.log('Throughput and latency');
+    printTable([
+      {
+        metric: 'batch ops/sec',
+        value: Number((result.hz || 0).toFixed(2)),
+      },
+      {
+        metric: 'throughput req/sec',
+        value: throughputReqPerSec,
+      },
+      {
+        metric: 'mean batch latency (ms)',
+        value: Number((result.mean || 0).toFixed(4)),
+      },
+      {
+        metric: 'rme (%)',
+        value: Number((result.rme || 0).toFixed(2)),
+      },
+    ]);
+
+    console.log('Memory (MiB)');
+    printTable([
+      {
+        metric: 'rss',
+        baseline: baseline.rssMiB,
+        postWarmup: postWarmup.rssMiB,
+        postRun: postRun.rssMiB,
+        delta: deltaRss,
+      },
+      {
+        metric: 'heapUsed',
+        baseline: baseline.heapUsedMiB,
+        postWarmup: postWarmup.heapUsedMiB,
+        postRun: postRun.heapUsedMiB,
+        delta: deltaHeap,
+      },
+    ]);
+
+    console.log('Request count');
+    printTable([
+      {
+        metric: 'mockRequests',
+        value: getRequestCount(),
+      },
+    ]);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
