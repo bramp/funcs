@@ -53,22 +53,26 @@ async function fetchWithLog(name, path, requestLogFields) {
     try {
         const response = await instance.get(path);
         if (LOG_UPSTREAM_REQUESTS) {
-            logEvent('INFO', 'upstream response', {
+            const durationMs = Date.now() - start;
+            const contentLength = response.headers?.['content-length'] || null;
+            logEvent('INFO', `upstream ${name} ${response.status} ${durationMs}ms${contentLength ? ` ${contentLength}b` : ''}`, {
                 ...requestLogFields,
                 upstream: name,
-                durationMs: Date.now() - start,
+                durationMs,
                 status: response.status,
-                contentLength: response.headers?.['content-length'] || null,
+                contentLength,
             });
         }
         return response.data;
     } catch (err) {
         // Axios throws on non-2xx responses and network failures; log and rethrow.
-        logEvent('ERROR', 'upstream request failed', {
+        const durationMs = Date.now() - start;
+        const upstreamStatus = err.response?.status || null;
+        logEvent('ERROR', `upstream ${name} failed${upstreamStatus ? ` ${upstreamStatus}` : ''} ${durationMs}ms: ${err.message}`, {
             ...requestLogFields,
             upstream: name,
-            durationMs: Date.now() - start,
-            status: err.response?.status || null,
+            durationMs,
+            status: upstreamStatus,
             error: err.message,
         });
         throw err;
