@@ -25,6 +25,7 @@
 	"scripts": {
 		"format": "prettier --write .",
 		"lint": "eslint --fix .",
-		"test": "ava"
+		"test": "ava",
+		"bench:memory": "node --expose-gc ./bench-memory.js"
 	}
 }

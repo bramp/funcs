@@ -20,5 +20,7 @@ node_modules
 eslint.config.js
 
 test.js
+bench-memory.js
+bench/
 
 Makefile

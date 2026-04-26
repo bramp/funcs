@@ -22,9 +22,10 @@ import xml from 'xml';
 
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID;
 const GA_API_SECRET = process.env.GA_API_SECRET;
+const VANGUARD_BASE_URL = process.env.VANGUARD_BASE_URL || 'https://api.vanguard.com/';
 
 export const instance = axios.create({
-    baseURL: 'https://api.vanguard.com/',
+    baseURL: VANGUARD_BASE_URL,
     timeout: 20000,
     headers: { 'Referer': 'https://investor.vanguard.com/' },
     httpsAgent: new https.Agent({ keepAlive: true }),
