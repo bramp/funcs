@@ -86,6 +86,12 @@ export const instance = axios.create({
     httpsAgent: new https.Agent({ keepAlive: true }),
 });
 
+const gaInstance = axios.create({
+    baseURL: 'https://www.google-analytics.com/',
+    timeout: 5000,
+    httpsAgent: new https.Agent({ keepAlive: true }),
+});
+
 const routes = [
     new Route('/vanguard/:fund'),  // cloudfunctions.net path (includes function name)
     new Route('/:fund'),            // run.app path (no function name prefix)
@@ -135,8 +141,8 @@ export function googleAnalyticsTrack(req) {
         return;
     }
 
-    const url = `https://www.google-analytics.com/mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`;
-    axios.post(url, {
+    const url = `mp/collect?measurement_id=${GA_MEASUREMENT_ID}&api_secret=${GA_API_SECRET}`;
+    gaInstance.post(url, {
         client_id: crypto.randomUUID(),
         events: [{
             name: 'page_view',
