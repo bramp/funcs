@@ -4,7 +4,7 @@
 	"type": "module",
 	"dependencies": {
 		"@google-cloud/functions-framework": "^5.0.2",
-		"axios": "^1.15.1",
+		"axios": "^1.15.2",
 		"route-parser": "^0.0.5",
 		"xml": "^1.0.1"
 	},
