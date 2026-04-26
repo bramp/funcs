@@ -23,6 +23,29 @@ import xml from 'xml';
 const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID;
 const GA_API_SECRET = process.env.GA_API_SECRET;
 const VANGUARD_BASE_URL = process.env.VANGUARD_BASE_URL || 'https://api.vanguard.com/';
+const LOG_UPSTREAM_REQUESTS = process.env.LOG_UPSTREAM_REQUESTS === '1';
+
+function memoryUsageMiB() {
+    const memory = process.memoryUsage();
+    return {
+        rss: Number((memory.rss / (1024 * 1024)).toFixed(2)),
+        heapUsed: Number((memory.heapUsed / (1024 * 1024)).toFixed(2)),
+    };
+}
+
+function getTraceId(req) {
+    const rawTraceHeader = req.get?.('x-cloud-trace-context');
+    const traceHeader = (typeof rawTraceHeader === 'string') ? rawTraceHeader : '';
+    return traceHeader.split('/')[0] || crypto.randomUUID();
+}
+
+function logEvent(level, message, fields = {}) {
+    console.log(JSON.stringify({
+        severity: level,
+        message,
+        ...fields,
+    }));
+}
 
 export const instance = axios.create({
     baseURL: VANGUARD_BASE_URL,
@@ -86,11 +109,30 @@ async function vanguardFetch(req, res) {
         throw new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"');
     }
 
+    const fetchWithLog = async (name, path, requestLogFields) => {
+        const start = Date.now();
+        const response = await instance.get(path);
+        if (LOG_UPSTREAM_REQUESTS) {
+            logEvent('INFO', 'upstream response', {
+                ...requestLogFields,
+                upstream: name,
+                durationMs: Date.now() - start,
+                contentLength: response.headers?.['content-length'] || null,
+            });
+        }
+        return response;
+    };
+
+    const requestLogFields = {
+        fund: params.fund,
+        path: req.url,
+    };
+
     const [profileRes, priceRes, performanceRes, expenseRes] = await Promise.all([
-        instance.get(`/rs/ire/01/pe/fund/${params.fund}/profile/.json`),
-        instance.get(`/rs/ire/01/pe/fund/${params.fund}/price/.json`),
-        instance.get(`/rs/ire/01/pe/fund/${params.fund}/performance/.json`),
-        instance.get(`/rs/ire/01/pe/fund/${params.fund}/expense/.json`),
+        fetchWithLog('profile', `/rs/ire/01/pe/fund/${params.fund}/profile/.json`, requestLogFields),
+        fetchWithLog('price', `/rs/ire/01/pe/fund/${params.fund}/price/.json`, requestLogFields),
+        fetchWithLog('performance', `/rs/ire/01/pe/fund/${params.fund}/performance/.json`, requestLogFields),
+        fetchWithLog('expense', `/rs/ire/01/pe/fund/${params.fund}/expense/.json`, requestLogFields),
     ]);
 
 
@@ -167,12 +209,34 @@ async function vanguardFetch(req, res) {
  * @param {Object}  res  Cloud Function response context.
  */
 export const vanguard = async (req, res) => {
+    const startedAt = Date.now();
+    const traceId = getTraceId(req);
+    const requestFields = {
+        traceId,
+        method: req.method,
+        path: req.url,
+        memoryMiB: memoryUsageMiB(),
+    };
+
+    logEvent('INFO', 'request started', requestFields);
     googleAnalyticsTrack(req);
 
     try {
         await vanguardFetch(req, res);
+        logEvent('INFO', 'request completed', {
+            ...requestFields,
+            durationMs: Date.now() - startedAt,
+            status: res.statusCode,
+            memoryMiB: memoryUsageMiB(),
+        });
     } catch (err) {
-        console.log(err);
+        logEvent('ERROR', 'request failed', {
+            ...requestFields,
+            durationMs: Date.now() - startedAt,
+            status: (err instanceof IllegalArgumentError) ? 412 : 500,
+            error: err.message,
+            memoryMiB: memoryUsageMiB(),
+        });
 
         const status = (err instanceof IllegalArgumentError) ? 412 : 500;
         const error = [

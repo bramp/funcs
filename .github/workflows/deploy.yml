@@ -55,5 +55,7 @@ jobs:
           entry_point: 'vanguard'
           region: 'us-central1'
           memory: '128Mi'
+          max_instance_request_concurrency: 1
+          max_instance_count: 2
           project_id: '${{ secrets.GCP_PROJECT_ID }}'
-          environment_variables: 'GA_MEASUREMENT_ID=${{ secrets.GA_MEASUREMENT_ID }},GA_API_SECRET=${{ secrets.GA_API_SECRET }}'
+          environment_variables: 'GA_MEASUREMENT_ID=${{ secrets.GA_MEASUREMENT_ID }},GA_API_SECRET=${{ secrets.GA_API_SECRET }},LOG_UPSTREAM_REQUESTS=1'
