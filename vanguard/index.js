@@ -24,6 +24,7 @@ const GA_MEASUREMENT_ID = process.env.GA_MEASUREMENT_ID;
 const GA_API_SECRET = process.env.GA_API_SECRET;
 const VANGUARD_BASE_URL = process.env.VANGUARD_BASE_URL || 'https://api.vanguard.com/';
 const LOG_UPSTREAM_REQUESTS = process.env.LOG_UPSTREAM_REQUESTS === '1';
+const LOG_REQUEST_LIFECYCLE = process.env.LOG_REQUEST_LIFECYCLE === '1';
 
 function memoryUsageMiB() {
     const memory = process.memoryUsage();
@@ -45,6 +46,33 @@ function logEvent(level, message, fields = {}) {
         message,
         ...fields,
     }));
+}
+
+async function fetchWithLog(name, path, requestLogFields) {
+    const start = Date.now();
+    try {
+        const response = await instance.get(path);
+        if (LOG_UPSTREAM_REQUESTS) {
+            logEvent('INFO', 'upstream response', {
+                ...requestLogFields,
+                upstream: name,
+                durationMs: Date.now() - start,
+                status: response.status,
+                contentLength: response.headers?.['content-length'] || null,
+            });
+        }
+        return response.data;
+    } catch (err) {
+        // Axios throws on non-2xx responses and network failures; log and rethrow.
+        logEvent('ERROR', 'upstream request failed', {
+            ...requestLogFields,
+            upstream: name,
+            durationMs: Date.now() - start,
+            status: err.response?.status || null,
+            error: err.message,
+        });
+        throw err;
+    }
 }
 
 export const instance = axios.create({
@@ -109,37 +137,52 @@ async function vanguardFetch(req, res) {
         throw new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"');
     }
 
-    const fetchWithLog = async (name, path, requestLogFields) => {
-        const start = Date.now();
-        const response = await instance.get(path);
-        if (LOG_UPSTREAM_REQUESTS) {
-            logEvent('INFO', 'upstream response', {
-                ...requestLogFields,
-                upstream: name,
-                durationMs: Date.now() - start,
-                contentLength: response.headers?.['content-length'] || null,
-            });
-        }
-        return response;
-    };
-
     const requestLogFields = {
         fund: params.fund,
         path: req.url,
     };
 
-    const [profileRes, priceRes, performanceRes, expenseRes] = await Promise.all([
-        fetchWithLog('profile', `/rs/ire/01/pe/fund/${params.fund}/profile/.json`, requestLogFields),
-        fetchWithLog('price', `/rs/ire/01/pe/fund/${params.fund}/price/.json`, requestLogFields),
-        fetchWithLog('performance', `/rs/ire/01/pe/fund/${params.fund}/performance/.json`, requestLogFields),
-        fetchWithLog('expense', `/rs/ire/01/pe/fund/${params.fund}/expense/.json`, requestLogFields),
+    const [profileData, priceData, performanceData, expenseData] = await Promise.all([
+        // profileData endpoint: keep only fields required by downstream XML output.
+        fetchWithLog('profile', `/rs/ire/01/pe/fund/${params.fund}/profile/.json`, requestLogFields)
+            .then((data) => {
+                const profile = data?.fundProfile || {};
+                return {
+                    fundId: profile.fundId,
+                    ticker: profile.ticker,
+                    longName: profile.longName,
+                    shortName: profile.shortName,
+                    category: profile.category,
+                    expenseRatio: profile.expenseRatio,
+                    cusip: profile.cusip,
+                    citFundId: profile.citFundId,
+                    associatedFundIds: profile.associatedFundIds || {},
+                };
+            }),
+
+        // priceData endpoint: retain just the regular daily price object.
+        fetchWithLog('price', `/rs/ire/01/pe/fund/${params.fund}/price/.json`, requestLogFields)
+            .then((data) => ({
+                regularPrice: data?.currentPrice?.dailyPrice?.regular || {},
+            })),
+
+        // performanceData endpoint: retain only month-end annual return structure.
+        fetchWithLog('performance', `/rs/ire/01/pe/fund/${params.fund}/performance/.json`, requestLogFields)
+            .then((data) => ({
+                monthEndAvgAnnualRtn: data?.monthEndAvgAnnualRtn || {},
+            })),
+
+        // expenseData endpoint: retain only expense ratio used in final XML.
+        fetchWithLog('expense', `/rs/ire/01/pe/fund/${params.fund}/expense/.json`, requestLogFields)
+            .then((data) => ({
+                expenseRatio: data?.expenseRatio,
+            })),
     ]);
 
-
-    const profile = profileRes.data.fundProfile || {};
-    const price = priceRes.data.currentPrice.dailyPrice.regular || {};
-    const performance = performanceRes.data.monthEndAvgAnnualRtn || {};
-    const expense = expenseRes.data || {};
+    const profile = profileData || {};
+    const price = priceData.regularPrice || {};
+    const performance = performanceData.monthEndAvgAnnualRtn || {};
+    const expense = expenseData || {};
 
     const fundIds = profile.associatedFundIds || {};
 
@@ -218,27 +261,34 @@ export const vanguard = async (req, res) => {
         memoryMiB: memoryUsageMiB(),
     };
 
-    logEvent('INFO', 'request started', requestFields);
+    if (LOG_REQUEST_LIFECYCLE) {
+        logEvent('INFO', 'request started', requestFields);
+    }
     googleAnalyticsTrack(req);
 
     try {
         await vanguardFetch(req, res);
-        logEvent('INFO', 'request completed', {
-            ...requestFields,
-            durationMs: Date.now() - startedAt,
-            status: res.statusCode,
-            memoryMiB: memoryUsageMiB(),
-        });
+        if (LOG_REQUEST_LIFECYCLE) {
+            logEvent('INFO', 'request completed', {
+                ...requestFields,
+                durationMs: Date.now() - startedAt,
+                status: res.statusCode,
+                memoryMiB: memoryUsageMiB(),
+            });
+        }
     } catch (err) {
-        logEvent('ERROR', 'request failed', {
-            ...requestFields,
-            durationMs: Date.now() - startedAt,
-            status: (err instanceof IllegalArgumentError) ? 412 : 500,
-            error: err.message,
-            memoryMiB: memoryUsageMiB(),
-        });
-
         const status = (err instanceof IllegalArgumentError) ? 412 : 500;
+
+        if (status >= 500 || LOG_REQUEST_LIFECYCLE) {
+            logEvent((status >= 500) ? 'ERROR' : 'INFO', 'request failed', {
+                ...requestFields,
+                durationMs: Date.now() - startedAt,
+                status,
+                error: err.message,
+                memoryMiB: memoryUsageMiB(),
+            });
+        }
+
         const error = [
             {
                 error: [

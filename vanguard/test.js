@@ -20,49 +20,7 @@ import { parseString } from 'xml2js';
 import { mockReq, mockRes } from 'sinon-express-mock';
 import { vanguard, instance, googleAnalyticsTrack } from './index.js';
 
-test.beforeEach((t) => {
-  t.context.sandbox = sinon.createSandbox();
-  t.context.sandbox.stub({ googleAnalyticsTrack }, 'googleAnalyticsTrack');
-});
-
-test.afterEach((t) => {
-  t.context.sandbox.restore();
-});
-
-test.serial(
-  'vanguard: should return a error when fund is missing',
-  async (t) => {
-    // Initialize mocks
-    const req = mockReq({ url: '' }); // Empty URL should fail match
-    const res = mockRes();
-
-    // Call tested function
-    await vanguard(req, res);
-
-    // Verify behavior of tested function
-    t.true(res.send.calledOnce);
-    t.is(res.status.lastCall.args[0], 412);
-    t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
-
-    await new Promise((resolve, reject) => {
-      parseString(res.send.lastCall.args[0], function (err, result) {
-        if (err) return reject(err);
-        t.is(
-          result.error.message[0],
-          'Fund missing from url, e.g. "https://example.com/vanguard/fundId"',
-        );
-        resolve();
-      });
-    });
-  },
-);
-
-test.serial('vanguard: fetch fund', async (t) => {
-  // Initialize mocks
-  const req = mockReq({ url: '/1234' });
-  const res = mockRes();
-
-  const instanceGet = t.context.sandbox.stub(instance, 'get');
+function setupSuccessfulUpstream(instanceGet) {
   instanceGet.withArgs(sinon.match(/profile/)).resolves({
     data: {
       fundProfile: {
@@ -115,6 +73,66 @@ test.serial('vanguard: fetch fund', async (t) => {
       expenseRatioAsOfDate: '2025-12-31T00:00:00-05:00',
     },
   });
+}
+
+async function assertXmlErrorResponse(t, res, status, message) {
+  t.true(res.send.calledOnce);
+  t.is(res.status.lastCall.args[0], status);
+  t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
+
+  await new Promise((resolve, reject) => {
+    parseString(res.send.lastCall.args[0], function (err, result) {
+      if (err) return reject(err);
+      t.is(result.error.message[0], message);
+      resolve();
+    });
+  });
+}
+
+test.beforeEach((t) => {
+  t.context.sandbox = sinon.createSandbox();
+  t.context.sandbox.stub({ googleAnalyticsTrack }, 'googleAnalyticsTrack');
+});
+
+test.afterEach((t) => {
+  t.context.sandbox.restore();
+});
+
+test.serial(
+  'vanguard: should return a error when fund is missing',
+  async (t) => {
+    // Initialize mocks
+    const req = mockReq({ url: '' }); // Empty URL should fail match
+    const res = mockRes();
+
+    // Call tested function
+    await vanguard(req, res);
+
+    // Verify behavior of tested function
+    t.true(res.send.calledOnce);
+    t.is(res.status.lastCall.args[0], 412);
+    t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
+
+    await new Promise((resolve, reject) => {
+      parseString(res.send.lastCall.args[0], function (err, result) {
+        if (err) return reject(err);
+        t.is(
+          result.error.message[0],
+          'Fund missing from url, e.g. "https://example.com/vanguard/fundId"',
+        );
+        resolve();
+      });
+    });
+  },
+);
+
+test.serial('vanguard: fetch fund', async (t) => {
+  // Initialize mocks
+  const req = mockReq({ url: '/1234' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  setupSuccessfulUpstream(instanceGet);
 
   // Call tested function
   await vanguard(req, res);
@@ -131,5 +149,72 @@ test.serial('vanguard: fetch fund', async (t) => {
       t.is(result.fund.ticker[0], 'TICK');
       resolve();
     });
+  });
+});
+
+test.serial('vanguard: upstream http error returns 500 xml error', async (t) => {
+  const req = mockReq({ url: '/1234' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  instanceGet.rejects(new Error('Request failed with status code 503'));
+
+  await vanguard(req, res);
+
+  t.true(res.send.calledOnce);
+  t.is(res.status.lastCall.args[0], 500);
+  t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
+
+  await new Promise((resolve, reject) => {
+    parseString(res.send.lastCall.args[0], function (err, result) {
+      if (err) return reject(err);
+      t.is(result.error.message[0], 'Request failed with status code 503');
+      resolve();
+    });
+  });
+});
+
+test.serial('vanguard: upstream network error returns 500 xml error', async (t) => {
+  const req = mockReq({ url: '/1234' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  instanceGet.rejects(new Error('socket hang up'));
+
+  await vanguard(req, res);
+
+  t.true(res.send.calledOnce);
+  t.is(res.status.lastCall.args[0], 500);
+  t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
+
+  await new Promise((resolve, reject) => {
+    parseString(res.send.lastCall.args[0], function (err, result) {
+      if (err) return reject(err);
+      t.is(result.error.message[0], 'socket hang up');
+      resolve();
+    });
+  });
+});
+
+const endpointFailures = [
+  { name: 'profile', matcher: /profile/ },
+  { name: 'price', matcher: /price/ },
+  { name: 'performance', matcher: /performance/ },
+  { name: 'expense', matcher: /expense/ },
+];
+
+endpointFailures.forEach(({ name, matcher }) => {
+  test.serial(`vanguard: ${name} failure returns 500 xml error`, async (t) => {
+    const req = mockReq({ url: '/1234' });
+    const res = mockRes();
+    const instanceGet = t.context.sandbox.stub(instance, 'get');
+    const errorMessage = `${name} endpoint failed`;
+
+    setupSuccessfulUpstream(instanceGet);
+    instanceGet.withArgs(sinon.match(matcher)).rejects(new Error(errorMessage));
+
+    await vanguard(req, res);
+
+    await assertXmlErrorResponse(t, res, 500, errorMessage);
   });
 });
