@@ -18,7 +18,7 @@ import test from 'ava';
 import sinon from 'sinon';
 import { parseString } from 'xml2js';
 import { mockReq, mockRes } from 'sinon-express-mock';
-import { vanguard, instance, googleAnalyticsTrack } from './index.js';
+import { vanguard, instance, googleAnalyticsTrack, normalizeAndValidateFundId } from './index.js';
 
 function setupSuccessfulUpstream(instanceGet) {
   instanceGet.withArgs(sinon.match(/profile/)).resolves({
@@ -194,6 +194,112 @@ test.serial('vanguard: upstream network error returns 500 xml error', async (t) 
       resolve();
     });
   });
+});
+
+test.serial('vanguard: non-vanguard ticker returns 400 without upstream call', async (t) => {
+  const req = mockReq({ url: '/AAPL' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+
+  await vanguard(req, res);
+
+  t.true(instanceGet.notCalled);
+  await assertXmlErrorResponse(
+    t,
+    res,
+    400,
+    'Invalid fund id format. Expected a Vanguard id such as "7555", "M219", or "VMFXX".',
+  );
+});
+
+test.serial('vanguard: accepts 5-letter vanguard ticker format', async (t) => {
+  const req = mockReq({ url: '/VMFXX' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  setupSuccessfulUpstream(instanceGet);
+
+  await vanguard(req, res);
+
+  t.true(instanceGet.called);
+  t.is(res.status.lastCall.args[0], 200);
+});
+
+test.serial('vanguard: accepts M plus 3 digits format', async (t) => {
+  const req = mockReq({ url: '/M219' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  setupSuccessfulUpstream(instanceGet);
+
+  await vanguard(req, res);
+
+  t.true(instanceGet.called);
+  t.is(res.status.lastCall.args[0], 200);
+});
+
+test.serial('vanguard: upstream 404 for valid fund id returns 404 xml error', async (t) => {
+  const req = mockReq({ url: '/1234' });
+  const res = mockRes();
+
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  const err = new Error('Request failed with status code 404');
+  err.response = { status: 404 };
+  instanceGet.rejects(err);
+
+  await vanguard(req, res);
+
+  await assertXmlErrorResponse(t, res, 404, 'Request failed with status code 404');
+});
+
+// All known-valid fund identifiers (ticker symbols and plan fund IDs).
+// ticker: public exchange symbol, or null for plan-only funds.
+// id: Vanguard internal plan fund ID.
+const knownFunds = [
+  { ticker: null,    id: '8317', name: 'EARNEST Partners Smid Cap Core Fund Founders Class' },
+  { ticker: null,    id: 'N488', name: 'Fidelity® Diversified International Commingled Pool Class C' },
+  { ticker: null,    id: '8880', name: 'Parnassus US Large Cap' },
+  { ticker: 'PIMIX', id: '3926', name: 'PIMCO Income Fund Institutional Class' },
+  { ticker: null,    id: '8074', name: 'Prudential Core Plus Bond Fund 15' },
+  { ticker: null,    id: '8561', name: 'Vanguard Developed Markets Index Trust' },
+  { ticker: 'VEMRX', id: '1865', name: 'Vanguard Emerging Markets Stock Index Fund Institutional Plus Shares' },
+  { ticker: null,    id: 'M219', name: 'Vanguard Institutional 500 Index Trust' },
+  { ticker: null,    id: '7553', name: 'Vanguard Institutional Extended Market Index Trust' },
+  { ticker: null,    id: '7555', name: 'Vanguard Institutional Total Bond Market Index Trust' },
+  { ticker: 'VGSNX', id: '3123', name: 'Vanguard Real Estate Index Fund Institutional Shares' },
+  { ticker: null,    id: '0338', name: 'Vanguard Retirement Savings Trust II' },
+  { ticker: null,    id: '7737', name: 'Vanguard Target Retirement 2020 Trust' },
+  { ticker: null,    id: '7738', name: 'Vanguard Target Retirement 2025 Trust' },
+  { ticker: null,    id: '7739', name: 'Vanguard Target Retirement 2030 Trust' },
+  { ticker: null,    id: '7740', name: 'Vanguard Target Retirement 2035 Trust' },
+  { ticker: null,    id: '7741', name: 'Vanguard Target Retirement 2040 Trust' },
+  { ticker: null,    id: '7742', name: 'Vanguard Target Retirement 2045 Trust' },
+  { ticker: null,    id: '7743', name: 'Vanguard Target Retirement 2050 Trust' },
+  { ticker: null,    id: '7744', name: 'Vanguard Target Retirement 2055 Trust' },
+  { ticker: null,    id: '7745', name: 'Vanguard Target Retirement 2060 Trust' },
+  { ticker: null,    id: '7746', name: 'Vanguard Target Retirement 2065 Trust' },
+  { ticker: null,    id: 'M013', name: 'Vanguard Target Retirement 2070 Trust' },
+  { ticker: null,    id: 'M012', name: 'Vanguard Target Retirement Income and Growth Trust' },
+  { ticker: null,    id: '7735', name: 'Vanguard Target Retirement Income Trust' },
+  { ticker: 'VTIFX', id: '2011', name: 'Vanguard Total International Bond Index Fund Institutional Shares' },
+  { ticker: 'VWIAX', id: '0527', name: 'Vanguard Wellesley Income Fund Admiral Shares' },
+];
+
+test('normalizeAndValidateFundId: accepts all known valid ids', (t) => {
+  for (const { ticker, id } of knownFunds) {
+    t.notThrows(() => normalizeAndValidateFundId(id), `expected plan fund id ${id} to be valid`);
+    if (ticker) {
+      t.notThrows(() => normalizeAndValidateFundId(ticker), `expected ticker ${ticker} to be valid`);
+    }
+  }
+});
+
+test('normalizeAndValidateFundId: rejects invalid ids', (t) => {
+  const invalid = ['AAPL', 'N/A', '', 'TOOLONG1', '123', 'AB', '—'];
+  for (const id of invalid) {
+    t.throws(() => normalizeAndValidateFundId(id), { instanceOf: Error }, `expected ${id} to be invalid`);
+  }
 });
 
 const endpointFailures = [

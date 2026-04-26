@@ -93,6 +93,34 @@ const routes = [
 class IllegalArgumentError extends Error { }
 
 /**
+ * Error carrying an explicit HTTP status for client-facing validation failures.
+ */
+class HttpStatusError extends Error {
+    constructor(status, message) {
+        super(message);
+        this.status = status;
+    }
+}
+
+export function normalizeAndValidateFundId(rawFund) {
+    const fundId = String(rawFund || '').trim().toUpperCase();
+
+    // Accept known Vanguard identifier families:
+    // - 4-digit internal IDs (e.g. 7555, 0584, 1865)
+    // - letter + 3 digits (e.g. M219, N488)
+    // - 5-letter share class tickers (e.g. VMFXX, VTSAX, PIMIX)
+    const isValid = /^\d{4}$/.test(fundId) || /^[A-Z]\d{3}$/.test(fundId) || /^[A-Z]{5}$/.test(fundId);
+    if (!isValid) {
+        throw new HttpStatusError(
+            400,
+            'Invalid fund id format. Expected a Vanguard id such as "7555", "M219", or "VMFXX".',
+        );
+    }
+
+    return fundId;
+}
+
+/**
  * Records this page view with Google Analytics 4 Measurement Protocol.
  * Fire-and-forget: errors are logged but do not affect the response.
  *
@@ -137,14 +165,16 @@ async function vanguardFetch(req, res) {
         throw new IllegalArgumentError('Fund missing from url, e.g. "https://example.com/vanguard/fundId"');
     }
 
+    const fundId = normalizeAndValidateFundId(params.fund);
+
     const requestLogFields = {
-        fund: params.fund,
+        fund: fundId,
         path: req.url,
     };
 
     const [profileData, priceData, performanceData, expenseData] = await Promise.all([
         // profileData endpoint: keep only fields required by downstream XML output.
-        fetchWithLog('profile', `/rs/ire/01/pe/fund/${params.fund}/profile/.json`, requestLogFields)
+        fetchWithLog('profile', `/rs/ire/01/pe/fund/${fundId}/profile/.json`, requestLogFields)
             .then((data) => {
                 const profile = data?.fundProfile || {};
                 return {
@@ -161,19 +191,19 @@ async function vanguardFetch(req, res) {
             }),
 
         // priceData endpoint: retain just the regular daily price object.
-        fetchWithLog('price', `/rs/ire/01/pe/fund/${params.fund}/price/.json`, requestLogFields)
+        fetchWithLog('price', `/rs/ire/01/pe/fund/${fundId}/price/.json`, requestLogFields)
             .then((data) => ({
                 regularPrice: data?.currentPrice?.dailyPrice?.regular || {},
             })),
 
         // performanceData endpoint: retain only month-end annual return structure.
-        fetchWithLog('performance', `/rs/ire/01/pe/fund/${params.fund}/performance/.json`, requestLogFields)
+        fetchWithLog('performance', `/rs/ire/01/pe/fund/${fundId}/performance/.json`, requestLogFields)
             .then((data) => ({
                 monthEndAvgAnnualRtn: data?.monthEndAvgAnnualRtn || {},
             })),
 
         // expenseData endpoint: retain only expense ratio used in final XML.
-        fetchWithLog('expense', `/rs/ire/01/pe/fund/${params.fund}/expense/.json`, requestLogFields)
+        fetchWithLog('expense', `/rs/ire/01/pe/fund/${fundId}/expense/.json`, requestLogFields)
             .then((data) => ({
                 expenseRatio: data?.expenseRatio,
             })),
@@ -277,7 +307,17 @@ export const vanguard = async (req, res) => {
             });
         }
     } catch (err) {
-        const status = (err instanceof IllegalArgumentError) ? 412 : 500;
+        let status = 500;
+        if (err instanceof IllegalArgumentError) {
+            status = 412;
+        } else if (Number(err?.status) >= 400 && Number(err?.status) < 500) {
+            status = Number(err.status);
+        } else {
+            const upstreamStatus = Number(err?.response?.status);
+            if (upstreamStatus >= 400 && upstreamStatus < 500) {
+                status = upstreamStatus;
+            }
+        }
 
         if (status >= 500 || LOG_REQUEST_LIFECYCLE) {
             logEvent((status >= 500) ? 'ERROR' : 'INFO', 'request failed', {
