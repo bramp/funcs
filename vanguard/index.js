@@ -280,7 +280,7 @@ async function vanguardFetch(req, res) {
         'Content-Type': 'text/xml',
 
         // TODO(bramp) Set expire date instead for close of market.
-        'Cache-Control': 'max-age=86400',
+        'Cache-Control': 'max-age=21600',
     }).send(xml(funds, true));
 };
 
