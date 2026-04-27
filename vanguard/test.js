@@ -141,6 +141,7 @@ test.serial('vanguard: fetch fund', async (t) => {
   t.true(res.send.calledOnce);
   t.is(res.status.lastCall.args[0], 200);
   t.is(res.set.lastCall.args[0]['Content-Type'], 'text/xml');
+  t.is(res.set.lastCall.args[0]['Cache-Control'], 'max-age=21600');
 
   await new Promise((resolve, reject) => {
     parseString(res.send.lastCall.args[0], function (err, result) {
