@@ -101,10 +101,6 @@ async function main() {
     forceGc();
     const baseline = memorySnapshot();
 
-    await bench.warmup();
-    forceGc();
-    const postWarmup = memorySnapshot();
-
     await bench.run();
     const task = bench.tasks[0];
     const result = task.result;
@@ -112,7 +108,9 @@ async function main() {
     forceGc();
     const postRun = memorySnapshot();
 
-    const throughputReqPerSec = Number(((result.hz || 0) * CONCURRENCY).toFixed(2));
+    const throughputReqPerSec = Number(
+      ((result.throughput.mean || 0) * CONCURRENCY).toFixed(2),
+    );
     const deltaRss = Number((postRun.rssMiB - baseline.rssMiB).toFixed(2));
     const deltaHeap = Number((postRun.heapUsedMiB - baseline.heapUsedMiB).toFixed(2));
 
@@ -131,7 +129,7 @@ async function main() {
     printTable([
       {
         metric: 'batch ops/sec',
-        value: Number((result.hz || 0).toFixed(2)),
+        value: Number((result.throughput.mean || 0).toFixed(2)),
       },
       {
         metric: 'throughput req/sec',
@@ -139,11 +137,11 @@ async function main() {
       },
       {
         metric: 'mean batch latency (ms)',
-        value: Number((result.mean || 0).toFixed(4)),
+        value: Number((result.latency.mean || 0).toFixed(4)),
       },
       {
         metric: 'rme (%)',
-        value: Number((result.rme || 0).toFixed(2)),
+        value: Number((result.latency.rme || 0).toFixed(2)),
       },
     ]);
 
@@ -152,14 +150,12 @@ async function main() {
       {
         metric: 'rss',
         baseline: baseline.rssMiB,
-        postWarmup: postWarmup.rssMiB,
         postRun: postRun.rssMiB,
         delta: deltaRss,
       },
       {
         metric: 'heapUsed',
         baseline: baseline.heapUsedMiB,
-        postWarmup: postWarmup.heapUsedMiB,
         postRun: postRun.heapUsedMiB,
         delta: deltaHeap,
       },
