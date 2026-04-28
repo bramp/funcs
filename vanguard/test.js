@@ -14,11 +14,15 @@
  * limitations under the License.
  */
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import test from 'ava';
 import sinon from 'sinon';
 import { parseString } from 'xml2js';
 import { mockReq, mockRes } from 'sinon-express-mock';
 import { vanguard, instance, googleAnalyticsTrack, normalizeAndValidateFundId } from './index.js';
+
+const execFileAsync = promisify(execFile);
 
 function setupSuccessfulUpstream(instanceGet) {
   instanceGet.withArgs(sinon.match(/profile/)).resolves({
@@ -324,4 +328,23 @@ endpointFailures.forEach(({ name, matcher }) => {
 
     await assertXmlErrorResponse(t, res, 500, errorMessage);
   });
+});
+
+test('bench-memory: smoke test runs without error', async (t) => {
+  const { stdout, stderr } = await execFileAsync(
+    process.execPath,
+    ['--expose-gc', './bench-memory.js'],
+    {
+      cwd: new URL('.', import.meta.url).pathname,
+      env: {
+        ...process.env,
+        BENCH_TIME_MS: '100',
+        BENCH_WARMUP_TIME_MS: '50',
+        BENCH_CONCURRENCY: '2',
+        BENCH_FUNDS: '1234',
+      },
+      timeout: 30000,
+    },
+  );
+  t.true(stdout.includes('Throughput and latency'), `expected benchmark output, got: ${stdout}`);
 });
