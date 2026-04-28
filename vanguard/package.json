@@ -17,7 +17,7 @@
 		"prettier": "^3.8.3",
 		"sinon": "^21.1.2",
 		"sinon-express-mock": "^2.1.0",
-		"tinybench": "^2.9.0",
+		"tinybench": "^6.0.0",
 		"xml2js": "^0.6.2"
 	},
 	"engines": {
