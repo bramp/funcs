@@ -282,8 +282,8 @@ test.serial('vanguard: upstream error log includes full upstream url', async (t)
     .find((entry) => entry?.upstream === 'profile' && entry?.error === errorMessage);
 
   t.truthy(upstreamLog, 'expected upstream profile error log');
-  t.is(upstreamLog.upstreamPath, '/rs/ire/01/pe/fund/1234/profile/.json');
   t.is(upstreamLog.upstreamUrl, 'https://api.vanguard.com/rs/ire/01/pe/fund/1234/profile/.json');
+  t.false('upstreamPath' in upstreamLog, 'upstreamPath should not be logged');
 });
 
 // All known-valid fund identifiers (ticker symbols and plan fund IDs).

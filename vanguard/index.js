@@ -59,7 +59,6 @@ async function fetchWithLog(name, path, requestLogFields) {
             logEvent('INFO', `upstream ${name} ${response.status} ${durationMs}ms${contentLength ? ` ${contentLength}b` : ''}`, {
                 ...requestLogFields,
                 upstream: name,
-                upstreamPath: path,
                 upstreamUrl,
                 durationMs,
                 status: response.status,
@@ -74,7 +73,6 @@ async function fetchWithLog(name, path, requestLogFields) {
         logEvent('ERROR', `upstream ${name} failed${upstreamStatus ? ` ${upstreamStatus}` : ''} ${durationMs}ms: ${err.message}`, {
             ...requestLogFields,
             upstream: name,
-            upstreamPath: path,
             upstreamUrl,
             durationMs,
             status: upstreamStatus,
