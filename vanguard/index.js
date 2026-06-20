@@ -50,6 +50,7 @@ function logEvent(level, message, fields = {}) {
 
 async function fetchWithLog(name, path, requestLogFields) {
     const start = Date.now();
+    const upstreamUrl = new URL(path, instance.defaults.baseURL).toString();
     try {
         const response = await instance.get(path);
         if (LOG_UPSTREAM_REQUESTS) {
@@ -58,6 +59,7 @@ async function fetchWithLog(name, path, requestLogFields) {
             logEvent('INFO', `upstream ${name} ${response.status} ${durationMs}ms${contentLength ? ` ${contentLength}b` : ''}`, {
                 ...requestLogFields,
                 upstream: name,
+                upstreamUrl,
                 durationMs,
                 status: response.status,
                 contentLength,
@@ -71,6 +73,7 @@ async function fetchWithLog(name, path, requestLogFields) {
         logEvent('ERROR', `upstream ${name} failed${upstreamStatus ? ` ${upstreamStatus}` : ''} ${durationMs}ms: ${err.message}`, {
             ...requestLogFields,
             upstream: name,
+            upstreamUrl,
             durationMs,
             status: upstreamStatus,
             error: err.message,

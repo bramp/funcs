@@ -258,6 +258,33 @@ test.serial('vanguard: upstream 404 for valid fund id returns 404 xml error', as
   await assertXmlErrorResponse(t, res, 404, 'Request failed with status code 404');
 });
 
+test.serial('vanguard: upstream error log includes full upstream url', async (t) => {
+  const req = mockReq({ url: '/1234' });
+  const res = mockRes();
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  const consoleLog = t.context.sandbox.stub(console, 'log');
+  const errorMessage = 'profile endpoint failed';
+
+  setupSuccessfulUpstream(instanceGet);
+  instanceGet.withArgs(sinon.match(/profile/)).rejects(new Error(errorMessage));
+
+  await vanguard(req, res);
+
+  const upstreamLog = consoleLog
+    .getCalls()
+    .map((call) => {
+      try {
+        return JSON.parse(call.args[0]);
+      } catch {
+        return null;
+      }
+    })
+    .find((entry) => entry?.upstream === 'profile' && entry?.error === errorMessage);
+
+  t.truthy(upstreamLog, 'expected upstream profile error log');
+  t.is(upstreamLog.upstreamUrl, 'https://api.vanguard.com/rs/ire/01/pe/fund/1234/profile/.json');
+});
+
 // All known-valid fund identifiers (ticker symbols and plan fund IDs).
 // ticker: public exchange symbol, or null for plan-only funds.
 // id: Vanguard internal plan fund ID.
