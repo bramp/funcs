@@ -45,7 +45,6 @@ jobs:
           fi
 
       - name: 'Check secrets'
-        if: steps.check-latest.outputs.is_latest == 'true'
         env:
           WIF_PROVIDER_NAME: ${{ secrets.WIF_PROVIDER_NAME }}
           GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
@@ -60,7 +59,6 @@ jobs:
           if [ -z "$GA_API_SECRET" ]; then echo "GA_API_SECRET secret is not set"; exit 1; fi
 
       - id: 'auth'
-        if: steps.check-latest.outputs.is_latest == 'true'
         uses: 'google-github-actions/auth@v3'
         with:
           workload_identity_provider: '${{ secrets.WIF_PROVIDER_NAME }}'
