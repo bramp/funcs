@@ -18,12 +18,31 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     environment: production
+    # Serialize deploys so GCP is never asked to run two operations at once.
+    # cancel-in-progress: false means a queued run waits rather than being dropped.
+    concurrency:
+      group: deploy-vanguard
+      cancel-in-progress: false
     permissions:
       contents: 'read'
       id-token: 'write'
 
     steps:
       - uses: actions/checkout@v7
+
+      - name: 'Check if commit is still latest'
+        id: check-latest
+        run: |
+          LATEST=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ -z "$LATEST" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+            echo "Could not determine HEAD, proceeding with deploy"
+          elif [ "${{ github.sha }}" = "$LATEST" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping deploy: ${{ github.sha }} is stale (HEAD is now $LATEST)"
+          fi
 
       - name: 'Check secrets'
         env:
@@ -46,6 +65,7 @@ jobs:
           service_account: '${{ secrets.GCP_SERVICE_ACCOUNT }}'
 
       - id: 'deploy'
+        if: steps.check-latest.outputs.is_latest == 'true'
         uses: 'google-github-actions/deploy-cloud-functions@v4'
         timeout-minutes: 10
         with:
