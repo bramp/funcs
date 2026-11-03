@@ -10,7 +10,7 @@
 	},
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
-		"ava": "^8.1.2",
+		"ava": "^8.3.0",
 		"eslint": "^10.14.0",
 		"eslint-plugin-promise": "^7.3.0",
 		"globals": "^17.13.0",
