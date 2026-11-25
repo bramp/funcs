@@ -117,9 +117,72 @@ gcloud functions deploy vanguard --runtime nodejs8 --trigger-http
 wget https://<path to cloud function>/vanguard/VIIIX
 ```
 
-## TODO
+## Production troubleshooting
 
-- [ ] Fix the tests!
+Vanguard is a Gen 2 function, so its request and application logs use the
+`cloud_run_revision` resource:
+
+```shell
+gcloud logging read \
+  'resource.type="cloud_run_revision" AND resource.labels.service_name="vanguard"' \
+  --project=bramp-projects --freshness=1d --limit=100
+```
+
+Upstream failures log the API URL, HTTP status, remote address, socket reuse,
+response content type/length, server header, and network error code. Text or
+binary error responses are fingerprinted with SHA-256; their bodies and cookies
+are not logged. Set `LOG_UPSTREAM_REQUESTS=1` to also log successful upstream
+requests and compare them by instance and remote address.
+
+Vanguard sometimes returns 404 for funds that exist. Production logs show this
+is sticky per instance: an affected instance 404s on every fund for hours. An
+upstream 404 is therefore handled as follows:
+
+1. Retry once over a fresh (non keep-alive) connection. The outcome is logged
+   with `retry: true`.
+2. If the fund is one of `KNOWN_FUNDS` (`VMFXX`, `7553`, `M219`, `7555`), return
+   500.
+3. Otherwise fetch the known fund `7555` as a canary (logged with `canary`). If
+   the canary also fails, return 500; if it succeeds, the fund truly doesn't
+   exist and we return 404.
+
+### Plan: replace this with a false-404 heuristic
+
+The retry, `KNOWN_FUNDS` list and canary check are temporary. They exist to
+return the right status code while collecting data. Once we can tell a false
+404 apart from a real one, they should be removed (see the `TODO` in
+`index.js`).
+
+1. **Collect data.** Deploy, then wait for an instance to go bad. Query the
+   upstream logs (`jsonPayload.upstream:*`) for that instance.
+2. **Is it the persistent connection?** Compare the first attempt with its
+   `retry: true` attempt:
+   - First attempt 404s with `reusedSocket: false`: a fresh connection still
+     fails, so reused connections are not the cause.
+   - First attempt 404s on a reused socket, and the retry succeeds on a fresh
+     socket to the same `remoteAddress`: the connection is the cause.
+   - Retry succeeds but `remoteAddress` changed: inconclusive (could be the
+     connection or the Vanguard server).
+   - Retry also 404s, while healthy instances get 200s from the same
+     `remoteAddress`: the instance (likely its outbound IP) is the cause.
+3. **Is a false 404 distinguishable?** A real "not found" (tested with `9999`,
+   `ZZZZZ`, `ABCDE`) returns `Server: Vanguard Server`, `text/html`, 2662 bytes,
+   with `responseBodySha256` starting `e8c37feb` and ending `29009fb`. Compare
+   the false 404s' `responseBodySha256`, `contentType`, `contentLength`,
+   `server` and `durationMs` (false 404s took a median of ~700 ms vs ~150 ms
+   for successes).
+4. **Simplify**, depending on what we find:
+   - False 404s look different: treat only the known "not found" page as a
+     404 and return 500 for anything else. Remove `KNOWN_FUNDS` and the canary.
+   - The retry on a fresh connection fixes it: keep the retry (or disable
+     keep-alive) and remove `KNOWN_FUNDS` and the canary.
+   - Neither: keep the canary check but drop `KNOWN_FUNDS`, or only run the
+     canary when this instance hasn't had a recent 200. If the instance's IP is
+     the cause, consider a fixed outbound IP via Cloud NAT.
+
+Check system logs for `Memory limit` when requests return 500/503. Deployment
+uses 256 MiB because production exceeded the former 128 MiB limit. Increasing
+memory does not address upstream 404s.
 
 ## Licence (Apache 2)
 

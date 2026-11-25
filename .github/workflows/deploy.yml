@@ -5,6 +5,7 @@ on:
     branches:
       - main
     paths:
+      - '.github/workflows/deploy.yml'
       - 'vanguard/**'
       - '!vanguard/test.js'
       - '!vanguard/README.md'
@@ -74,7 +75,7 @@ jobs:
           source_dir: 'vanguard'
           entry_point: 'vanguard'
           region: 'us-central1'
-          memory: '128Mi'
+          memory: '256Mi'
           max_instance_request_concurrency: 1
           max_instance_count: 2
           project_id: '${{ secrets.GCP_PROJECT_ID }}'

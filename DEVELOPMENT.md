@@ -33,5 +33,12 @@ GitHub Actions are configured to run tests on every push and pull request.
 See `.github/workflows/test.yml`.
 
 ## Deployment
-Currently, deployment is handled via GitHub Actions when tags are pushed.
-(TODO: Add details about deployment)
+GitHub Actions deploys Vanguard after tests pass on pushes to `main` that change
+function code or `.github/workflows/deploy.yml`. Changes limited to the function's
+tests, README, or Makefile do not trigger deployment.
+
+The function runs on Node.js 24 in `us-central1`, with 256 MiB of memory,
+one request per instance, and a maximum of two instances. The previous 128 MiB
+limit caused production instances to be terminated at approximately 135-139 MiB.
+Validate memory usage after deployment; a local mock benchmark does not include
+all Cloud Run runtime overhead.
