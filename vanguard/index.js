@@ -16,6 +16,7 @@
 
 import axios from 'axios';
 import crypto from 'crypto';
+import dns from 'dns';
 import https from 'https';
 import Route from 'route-parser';
 import xml from 'xml';
@@ -48,73 +49,101 @@ function logEvent(level, message, fields = {}) {
     }));
 }
 
-function upstreamResponseFields(response, request = response?.request) {
+/*
+ * Workaround for false 404s from api.vanguard.com (observed November 2026).
+ *
+ * api.vanguard.com is a CNAME to Akamai's traffic manager
+ * (api.vanguard.com.akadns.net), which normally resolves to Vanguard's own
+ * servers. They always send `Server: Vanguard Server`, including on a real
+ * 404 for an unknown fund.
+ *
+ * For hours at a time, the DNS resolver of some Cloud Run instances instead
+ * returns Akamai edge servers (23.x.x.x) that answer every request, for every
+ * fund, with an empty 404 and `Server: Apache`. Retrying on a new connection
+ * does not help, because the instance's resolver keeps returning those servers.
+ *
+ * So a 404 without `Server: Vanguard Server` is treated as a false 404 and
+ * retried once, with api.vanguard.com resolved through public DNS instead of
+ * the instance's resolver. If the retry also gets a false 404, we return 500,
+ * so callers such as Google Sheets don't mistake it for an unknown fund.
+ *
+ * Remove this once Vanguard/Akamai fix the routing. See "False 404s" in
+ * README.md for how to check whether it is still needed.
+ */
+const VANGUARD_SERVER_HEADER = 'Vanguard Server';
+
+export const publicResolver = new dns.promises.Resolver({ timeout: 2000, tries: 1 });
+publicResolver.setServers(['1.1.1.1', '8.8.8.8']);
+
+/**
+ * net.connect() `lookup` that resolves hostnames through publicResolver
+ * instead of the system resolver.
+ */
+export function publicDnsLookup(hostname, options, callback) {
+    publicResolver.resolve4(hostname).then((addresses) => {
+        const address = addresses[Math.floor(Math.random() * addresses.length)];
+        if (options.all) {
+            callback(null, [{ address, family: 4 }]);
+        } else {
+            callback(null, address, 4);
+        }
+    }, (err) => callback(err));
+}
+
+// No keep-alive, so every retry does a fresh public DNS lookup.
+export const publicDnsAgent = new https.Agent({ keepAlive: false, lookup: publicDnsLookup });
+
+/**
+ * Returns true if Vanguard returned a 404 that didn't come from Vanguard's
+ * own servers (see the workaround comment above).
+ */
+function isFalse404(err) {
+    return err?.response?.status === 404
+        && err.response.headers?.server !== VANGUARD_SERVER_HEADER;
+}
+
+/**
+ * Fetches a Vanguard API path, retrying a false 404 once via public DNS.
+ */
+async function fetchVanguard(name, path, logFields) {
+    try {
+        return await fetchWithLog(name, path, logFields);
+    } catch (err) {
+        if (!isFalse404(err)) throw err;
+    }
+
+    try {
+        return await fetchWithLog(name, path, { ...logFields, retry: 'public-dns' }, { httpsAgent: publicDnsAgent });
+    } catch (err) {
+        if (isFalse404(err)) {
+            throw new UpstreamError('Vanguard API returned an invalid 404 response; try again later');
+        }
+        throw err;
+    }
+}
+
+function connectionFields(response, request = response?.request) {
     return {
         remoteAddress: request?.socket?.remoteAddress || null,
-        reusedSocket: request?.reusedSocket ?? null,
-        contentType: response?.headers?.['content-type'] || null,
-        contentLength: response?.headers?.['content-length'] || null,
         server: response?.headers?.server || null,
     };
 }
 
-// TODO(bramp): The 404 retry, KNOWN_FUNDS and canary check below are a
-// temporary workaround for Vanguard returning false 404s. Once the logs give
-// us a heuristic that tells a false 404 from a real one (e.g. by
-// responseBodySha256, or whether a fresh connection fixes it), remove
-// KNOWN_FUNDS, CANARY_FUND, fetchWithRetry and classifyUpstream404 and replace
-// them with that simpler check. See "Plan: replace this with a false-404
-// heuristic" in README.md.
-
-// Funds that always exist. An upstream 404 for any of these means Vanguard is
-// misbehaving (not that the fund is missing), so we return a 500 instead.
-export const KNOWN_FUNDS = new Set(['VMFXX', '7553', 'M219', '7555']);
-const CANARY_FUND = '7555';
-
-function isUpstream404(err) {
-    return err?.response?.status === 404;
-}
-
-/**
- * Fetches from Vanguard, retrying a 404 once over a fresh (non keep-alive)
- * connection. Production 404s are sticky per instance, so the retry outcome is
- * logged to tell connection-level problems apart from instance-level ones.
- */
-async function fetchWithRetry(name, path, requestLogFields) {
-    try {
-        return await fetchWithLog(name, path, requestLogFields);
-    } catch (err) {
-        if (!isUpstream404(err)) throw err;
-        return fetchWithLog(name, path, { ...requestLogFields, retry: true }, {
-            httpsAgent: new https.Agent({ keepAlive: false }),
-        });
-    }
-}
-
-async function fetchWithLog(name, path, requestLogFields, config) {
+async function fetchWithLog(name, path, logFields, config) {
     const start = Date.now();
     const upstreamUrl = new URL(path, instance.defaults.baseURL).toString();
     try {
         const response = await instance.get(path, config);
-        if (requestLogFields.retry || requestLogFields.canary) {
-            logEvent('WARNING', `upstream ${name} ${requestLogFields.canary ? 'canary' : 'retry'} succeeded ${response.status}`, {
-                ...requestLogFields,
-                upstream: name,
-                upstreamUrl,
-                status: response.status,
-                ...upstreamResponseFields(response),
-            });
-        }
-        else if (LOG_UPSTREAM_REQUESTS) {
+        // Always log retry successes, to confirm the false 404 workaround works.
+        if (LOG_UPSTREAM_REQUESTS || logFields.retry) {
             const durationMs = Date.now() - start;
-            const contentLength = response.headers?.['content-length'] || null;
-            logEvent('INFO', `upstream ${name} ${response.status} ${durationMs}ms${contentLength ? ` ${contentLength}b` : ''}`, {
-                ...requestLogFields,
+            logEvent('INFO', `upstream ${name} ${response.status} ${durationMs}ms`, {
+                ...logFields,
                 upstream: name,
                 upstreamUrl,
                 durationMs,
                 status: response.status,
-                ...upstreamResponseFields(response),
+                ...connectionFields(response),
             });
         }
         return response.data;
@@ -122,19 +151,15 @@ async function fetchWithLog(name, path, requestLogFields, config) {
         // Axios throws on non-2xx responses and network failures; log and rethrow.
         const durationMs = Date.now() - start;
         const upstreamStatus = err.response?.status || null;
-        logEvent('ERROR', `upstream ${name} failed${upstreamStatus ? ` ${upstreamStatus}` : ''} ${durationMs}ms: ${err.message}`, {
-            ...requestLogFields,
+        const outcome = isFalse404(err) ? 'false 404' : `failed${upstreamStatus ? ` ${upstreamStatus}` : ''}`;
+        logEvent(isFalse404(err) ? 'WARNING' : 'ERROR', `upstream ${name} ${outcome} ${durationMs}ms: ${err.message}`, {
+            ...logFields,
             upstream: name,
             upstreamUrl,
             durationMs,
             status: upstreamStatus,
             error: err.message,
-            code: err.code || null,
-            ...upstreamResponseFields(err.response, err.response?.request || err.request),
-            // Fingerprint error pages without logging response bodies or cookies.
-            responseBodySha256: (typeof err.response?.data === 'string' || Buffer.isBuffer(err.response?.data))
-                ? crypto.createHash('sha256').update(err.response.data).digest('hex')
-                : null,
+            ...connectionFields(err.response, err.response?.request || err.request),
         });
         throw err;
     }
@@ -164,7 +189,7 @@ const routes = [
 class IllegalArgumentError extends Error { }
 
 /**
- * Error for when Vanguard misbehaves; always reported as a 500.
+ * Error for when the Vanguard API misbehaves; always reported as a 500.
  */
 class UpstreamError extends Error { }
 
@@ -222,28 +247,6 @@ export function googleAnalyticsTrack(req) {
 }
 
 /**
- * Decides whether an upstream 404 means the fund truly doesn't exist (404) or
- * Vanguard is failing (500). Always rethrows.
- */
-async function classifyUpstream404(err, fundId, requestLogFields) {
-    if (!isUpstream404(err)) throw err;
-
-    if (KNOWN_FUNDS.has(fundId)) {
-        throw new UpstreamError(`Vanguard returned 404 for known fund ${fundId}`);
-    }
-
-    try {
-        await fetchWithLog('profile', `/rs/ire/01/pe/fund/${CANARY_FUND}/profile/.json`,
-            { ...requestLogFields, canary: CANARY_FUND },
-            { httpsAgent: new https.Agent({ keepAlive: false }) });
-    } catch (canaryErr) {
-        throw new UpstreamError(
-            `Vanguard returned 404 for ${fundId} and canary fund ${CANARY_FUND} also failed: ${canaryErr.message}`);
-    }
-    throw err;
-}
-
-/**
  * Queries an undocumented Vanguard API to return information
  * in XML format about specific funds. Useful for importing into
  * Google Sheets with the IMPORTXML() function.
@@ -272,7 +275,7 @@ async function vanguardFetch(req, res) {
 
     const [profileData, priceData, performanceData, expenseData] = await Promise.all([
         // profileData endpoint: keep only fields required by downstream XML output.
-        fetchWithRetry('profile', `/rs/ire/01/pe/fund/${fundId}/profile/.json`, requestLogFields)
+        fetchVanguard('profile', `/rs/ire/01/pe/fund/${fundId}/profile/.json`, requestLogFields)
             .then((data) => {
                 const profile = data?.fundProfile || {};
                 return {
@@ -289,23 +292,23 @@ async function vanguardFetch(req, res) {
             }),
 
         // priceData endpoint: retain just the regular daily price object.
-        fetchWithRetry('price', `/rs/ire/01/pe/fund/${fundId}/price/.json`, requestLogFields)
+        fetchVanguard('price', `/rs/ire/01/pe/fund/${fundId}/price/.json`, requestLogFields)
             .then((data) => ({
                 regularPrice: data?.currentPrice?.dailyPrice?.regular || {},
             })),
 
         // performanceData endpoint: retain only month-end annual return structure.
-        fetchWithRetry('performance', `/rs/ire/01/pe/fund/${fundId}/performance/.json`, requestLogFields)
+        fetchVanguard('performance', `/rs/ire/01/pe/fund/${fundId}/performance/.json`, requestLogFields)
             .then((data) => ({
                 monthEndAvgAnnualRtn: data?.monthEndAvgAnnualRtn || {},
             })),
 
         // expenseData endpoint: retain only expense ratio used in final XML.
-        fetchWithRetry('expense', `/rs/ire/01/pe/fund/${fundId}/expense/.json`, requestLogFields)
+        fetchVanguard('expense', `/rs/ire/01/pe/fund/${fundId}/expense/.json`, requestLogFields)
             .then((data) => ({
                 expenseRatio: data?.expenseRatio,
             })),
-    ]).catch((err) => classifyUpstream404(err, fundId, requestLogFields));
+    ]);
 
     const profile = profileData || {};
     const price = priceData.regularPrice || {};

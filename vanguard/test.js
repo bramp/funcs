@@ -15,13 +15,15 @@
  */
 
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import test from 'ava';
 import sinon from 'sinon';
 import { parseString } from 'xml2js';
 import { mockReq, mockRes } from 'sinon-express-mock';
-import { vanguard, instance, googleAnalyticsTrack, normalizeAndValidateFundId } from './index.js';
+import {
+  vanguard, instance, googleAnalyticsTrack, normalizeAndValidateFundId,
+  publicDnsAgent, publicDnsLookup, publicResolver,
+} from './index.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -245,58 +247,56 @@ test.serial('vanguard: accepts M plus 3 digits format', async (t) => {
   t.is(res.status.lastCall.args[0], 200);
 });
 
-function upstream404() {
+function upstream404(server) {
   const err = new Error('Request failed with status code 404');
-  err.response = { status: 404 };
+  err.response = { status: 404, headers: { server } };
   return err;
 }
 
-test.serial('vanguard: upstream 404 is a real 404 when the canary fund succeeds', async (t) => {
+test.serial('vanguard: 404 from Vanguard Server is a real 404 and is not retried', async (t) => {
   const res = mockRes();
   const instanceGet = t.context.sandbox.stub(instance, 'get');
-  setupSuccessfulUpstream(instanceGet);
-  instanceGet.withArgs(sinon.match(/fund\/1234\//)).rejects(upstream404());
+  instanceGet.rejects(upstream404('Vanguard Server'));
 
   await vanguard(mockReq({ url: '/1234' }), res);
 
   await assertXmlErrorResponse(t, res, 404, 'Request failed with status code 404');
-  t.true(instanceGet.calledWith(sinon.match(/fund\/7555\/profile/)));
+  t.false(instanceGet.calledWith(sinon.match.any, sinon.match({ httpsAgent: publicDnsAgent })));
 });
 
-test.serial('vanguard: upstream 404 returns 500 when the canary fund also 404s', async (t) => {
-  const res = mockRes();
-  const instanceGet = t.context.sandbox.stub(instance, 'get');
-  instanceGet.rejects(upstream404());
-
-  await vanguard(mockReq({ url: '/1234' }), res);
-
-  await assertXmlErrorResponse(t, res, 500,
-    'Vanguard returned 404 for 1234 and canary fund 7555 also failed: Request failed with status code 404');
-});
-
-test.serial('vanguard: upstream 404 for a known fund returns 500 without a canary', async (t) => {
+test.serial('vanguard: false 404 is retried via public DNS', async (t) => {
   const res = mockRes();
   const instanceGet = t.context.sandbox.stub(instance, 'get');
   setupSuccessfulUpstream(instanceGet);
-  instanceGet.withArgs(sinon.match(/fund\/M219\/price/)).rejects(upstream404());
-
-  await vanguard(mockReq({ url: '/m219' }), res);
-
-  await assertXmlErrorResponse(t, res, 500, 'Vanguard returned 404 for known fund M219');
-  t.false(instanceGet.calledWith(sinon.match(/fund\/7555\//)));
-});
-
-test.serial('vanguard: upstream 404 is retried once on a fresh connection', async (t) => {
-  const res = mockRes();
-  const instanceGet = t.context.sandbox.stub(instance, 'get');
-  setupSuccessfulUpstream(instanceGet);
-  instanceGet.withArgs(sinon.match(/profile/), undefined).rejects(upstream404());
+  instanceGet.withArgs(sinon.match(/profile/), undefined).rejects(upstream404('Apache'));
 
   await vanguard(mockReq({ url: '/1234' }), res);
 
   t.is(res.status.lastCall.args[0], 200);
-  const retry = instanceGet.getCalls().find((c) => /profile/.test(c.args[0]) && c.args[1]);
-  t.false(retry.args[1].httpsAgent.keepAlive);
+  t.true(instanceGet.calledWith(sinon.match(/profile/), sinon.match({ httpsAgent: publicDnsAgent })));
+});
+
+test.serial('vanguard: false 404 on the retry returns 500', async (t) => {
+  const res = mockRes();
+  const instanceGet = t.context.sandbox.stub(instance, 'get');
+  setupSuccessfulUpstream(instanceGet);
+  instanceGet.withArgs(sinon.match(/price/)).rejects(upstream404('Apache'));
+
+  await vanguard(mockReq({ url: '/1234' }), res);
+
+  await assertXmlErrorResponse(t, res, 500, 'Vanguard API returned an invalid 404 response; try again later');
+});
+
+test.serial('publicDnsLookup: returns a resolved address in both callback forms', async (t) => {
+  t.context.sandbox.stub(publicResolver, 'resolve4').resolves(['192.0.2.10']);
+
+  const single = await new Promise((resolve, reject) => publicDnsLookup('api.vanguard.com', {},
+    (err, address, family) => (err ? reject(err) : resolve([address, family]))));
+  t.deepEqual(single, ['192.0.2.10', 4]);
+
+  const all = await new Promise((resolve, reject) => publicDnsLookup('api.vanguard.com', { all: true },
+    (err, addresses) => (err ? reject(err) : resolve(addresses))));
+  t.deepEqual(all, [{ address: '192.0.2.10', family: 4 }]);
 });
 
 test.serial('vanguard: upstream error log includes full upstream url', async (t) => {
@@ -324,75 +324,6 @@ test.serial('vanguard: upstream error log includes full upstream url', async (t)
 
   t.truthy(upstreamLog, 'expected upstream profile error log');
   t.is(upstreamLog.upstreamUrl, 'https://api.vanguard.com/rs/ire/01/pe/fund/1234/profile/.json');
-});
-
-test.serial('vanguard: upstream 404 logs connection metadata without exposing the response', async (t) => {
-  const res = mockRes();
-  const instanceGet = t.context.sandbox.stub(instance, 'get');
-  const consoleLog = t.context.sandbox.stub(console, 'log');
-  const body = '<html><title>Not Found</title></html>';
-  const err = new Error('Request failed with status code 404');
-  err.code = 'ERR_BAD_REQUEST';
-  err.response = {
-    status: 404,
-    headers: {
-      'content-type': 'text/html',
-      'content-length': String(Buffer.byteLength(body)),
-      'server': 'upstream-server',
-      'set-cookie': 'private-cookie',
-    },
-    data: body,
-    request: {
-      socket: { remoteAddress: '192.0.2.1' },
-      reusedSocket: true,
-    },
-  };
-  setupSuccessfulUpstream(instanceGet);
-  instanceGet.withArgs(sinon.match(/fund\/1234\/profile/)).rejects(err);
-
-  await vanguard(mockReq({ url: '/1234' }), res);
-
-  await assertXmlErrorResponse(t, res, 404, err.message);
-  const entries = consoleLog.getCalls().map((call) => JSON.parse(call.args[0]));
-  const log = entries.find((entry) => entry.upstream === 'profile');
-  t.like(log, {
-    remoteAddress: '192.0.2.1',
-    reusedSocket: true,
-    contentType: 'text/html',
-    contentLength: String(Buffer.byteLength(body)),
-    server: 'upstream-server',
-    code: 'ERR_BAD_REQUEST',
-    responseBodySha256: createHash('sha256').update(body).digest('hex'),
-  });
-  t.false(JSON.stringify(entries).includes(body));
-  t.false(JSON.stringify(entries).includes('private-cookie'));
-});
-
-test.serial('vanguard: connection failure logs metadata when no response exists', async (t) => {
-  const res = mockRes();
-  const instanceGet = t.context.sandbox.stub(instance, 'get');
-  const consoleLog = t.context.sandbox.stub(console, 'log');
-  const err = new Error('socket hang up');
-  err.code = 'ECONNRESET';
-  err.request = { socket: { remoteAddress: '192.0.2.2' }, reusedSocket: false };
-  setupSuccessfulUpstream(instanceGet);
-  instanceGet.withArgs(sinon.match(/profile/)).rejects(err);
-
-  await vanguard(mockReq({ url: '/1234' }), res);
-
-  await assertXmlErrorResponse(t, res, 500, err.message);
-  const log = consoleLog.getCalls()
-    .map((call) => JSON.parse(call.args[0]))
-    .find((entry) => entry.upstream === 'profile');
-  t.like(log, {
-    remoteAddress: '192.0.2.2',
-    reusedSocket: false,
-    contentType: null,
-    contentLength: null,
-    server: null,
-    code: 'ECONNRESET',
-    responseBodySha256: null,
-  });
 });
 
 // All known-valid fund identifiers (ticker symbols and plan fund IDs).
